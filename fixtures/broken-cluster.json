@@ -1,0 +1,582 @@
+{
+  "pods": {
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "checkout-7d9f4c8b6-x2klm",
+          "namespace": "payments",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "checkout-7d9f4c8b6",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "checkout",
+              "image": "reg.internal/checkout:2.4.0",
+              "resources": {
+                "limits": {
+                  "memory": "512Mi",
+                  "cpu": "500m"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "checkout",
+              "image": "reg.internal/checkout:2.4.0",
+              "ready": false,
+              "restartCount": 8,
+              "state": {
+                "waiting": {
+                  "reason": "CrashLoopBackOff",
+                  "message": "back-off 5m0s restarting failed container=checkout"
+                }
+              },
+              "lastState": {
+                "terminated": {
+                  "reason": "Error",
+                  "exitCode": 1,
+                  "finishedAt": "2026-08-09T14:01:52Z"
+                }
+              }
+            }
+          ],
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "checkout-7d9f4c8b6-p8trq",
+          "namespace": "payments",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "checkout-7d9f4c8b6",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "checkout",
+              "image": "reg.internal/checkout:2.4.0",
+              "resources": {
+                "limits": {
+                  "memory": "512Mi",
+                  "cpu": "500m"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "checkout",
+              "image": "reg.internal/checkout:2.4.0",
+              "ready": false,
+              "restartCount": 7,
+              "state": {
+                "waiting": {
+                  "reason": "CrashLoopBackOff",
+                  "message": "back-off 5m0s restarting failed container=checkout"
+                }
+              },
+              "lastState": {
+                "terminated": {
+                  "reason": "Error",
+                  "exitCode": 1,
+                  "finishedAt": "2026-08-09T14:01:40Z"
+                }
+              }
+            }
+          ],
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "api-5c6d7f8a9b-mn4zx",
+          "namespace": "payments",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "api-5c6d7f8a9b",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "api",
+              "image": "reg.internal/api:1.9.2",
+              "resources": {
+                "limits": {
+                  "memory": "256Mi",
+                  "cpu": "1"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "api",
+              "image": "reg.internal/api:1.9.2",
+              "ready": true,
+              "restartCount": 3,
+              "state": {
+                "running": {
+                  "startedAt": "2026-08-09T14:02:11Z"
+                }
+              },
+              "lastState": {
+                "terminated": {
+                  "reason": "OOMKilled",
+                  "exitCode": 137,
+                  "finishedAt": "2026-08-09T13:58:03Z"
+                }
+              }
+            }
+          ],
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "report-worker-6b8c9d2e1f-qq7ws",
+          "namespace": "jobs",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "report-worker-6b8c9d2e1f",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "worker",
+              "image": "reg.internal/report-worker:v3.1.7"
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "worker",
+              "image": "reg.internal/report-worker:v3.1.7",
+              "ready": false,
+              "restartCount": 0,
+              "state": {
+                "waiting": {
+                  "reason": "ImagePullBackOff",
+                  "message": "Back-off pulling image \"reg.internal/report-worker:v3.1.7\""
+                }
+              }
+            }
+          ],
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "emailer-84f5b6c7d8-vv3nn",
+          "namespace": "jobs",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "emailer-84f5b6c7d8",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "emailer",
+              "image": "reg.internal/emailer:1.0.4"
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "emailer",
+              "image": "reg.internal/emailer:1.0.4",
+              "ready": false,
+              "restartCount": 0,
+              "state": {
+                "waiting": {
+                  "reason": "CreateContainerConfigError",
+                  "message": "configmap \"emailer-smtp\" not found"
+                }
+              }
+            }
+          ],
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "ingest-9f8e7d6c5b-hh2pp",
+          "namespace": "analytics",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "ingest-9f8e7d6c5b",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "ingest",
+              "image": "reg.internal/ingest:4.0.1",
+              "resources": {
+                "requests": {
+                  "memory": "64Gi",
+                  "cpu": "8"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "phase": "Pending",
+          "containerStatuses": [],
+          "conditions": [
+            {
+              "type": "PodScheduled",
+              "status": "False",
+              "reason": "Unschedulable",
+              "message": "0/3 nodes are available: 3 Insufficient memory."
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "frontend-3a2b1c9d8e-ss5mm",
+          "namespace": "web",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "frontend-3a2b1c9d8e",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "frontend",
+              "image": "reg.internal/frontend:8.2.0"
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "frontend",
+              "image": "reg.internal/frontend:8.2.0",
+              "ready": true,
+              "restartCount": 11,
+              "state": {
+                "running": {
+                  "startedAt": "2026-08-09T14:02:11Z"
+                }
+              },
+              "lastState": {
+                "terminated": {
+                  "reason": "Error",
+                  "exitCode": 143,
+                  "finishedAt": "2026-08-09T13:44:20Z"
+                }
+              }
+            }
+          ],
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "coredns-76f75df574-abcde",
+          "namespace": "kube-system",
+          "ownerReferences": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "ReplicaSet",
+              "name": "coredns-76f75df574",
+              "controller": true
+            }
+          ]
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "coredns",
+              "image": "registry.k8s.io/coredns/coredns:v1.11.1"
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "coredns",
+              "image": "registry.k8s.io/coredns/coredns:v1.11.1",
+              "ready": false,
+              "restartCount": 6,
+              "state": {
+                "waiting": {
+                  "reason": "CrashLoopBackOff",
+                  "message": "back-off restarting failed container"
+                }
+              },
+              "lastState": {
+                "terminated": {
+                  "reason": "Error",
+                  "exitCode": 1
+                }
+              }
+            }
+          ],
+          "conditions": []
+        }
+      }
+    ]
+  },
+  "deployments": {
+    "items": [
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "checkout",
+          "namespace": "payments",
+          "annotations": {
+            "deployment.kubernetes.io/revision": "12"
+          }
+        },
+        "spec": {
+          "replicas": 3
+        },
+        "status": {
+          "replicas": 3,
+          "availableReplicas": 1,
+          "conditions": [
+            {
+              "type": "Progressing",
+              "status": "False",
+              "reason": "ProgressDeadlineExceeded",
+              "message": "ReplicaSet \"checkout-7d9f4c8b6\" has timed out progressing."
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "api",
+          "namespace": "payments",
+          "annotations": {
+            "deployment.kubernetes.io/revision": "7"
+          }
+        },
+        "spec": {
+          "replicas": 4
+        },
+        "status": {
+          "replicas": 4,
+          "availableReplicas": 4,
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "report-worker",
+          "namespace": "jobs",
+          "annotations": {
+            "deployment.kubernetes.io/revision": "4"
+          }
+        },
+        "spec": {
+          "replicas": 2
+        },
+        "status": {
+          "replicas": 2,
+          "availableReplicas": 0,
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "emailer",
+          "namespace": "jobs",
+          "annotations": {
+            "deployment.kubernetes.io/revision": "1"
+          }
+        },
+        "spec": {
+          "replicas": 1
+        },
+        "status": {
+          "replicas": 1,
+          "availableReplicas": 0,
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "ingest",
+          "namespace": "analytics"
+        },
+        "spec": {
+          "replicas": 2
+        },
+        "status": {
+          "replicas": 2,
+          "availableReplicas": 1,
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "frontend",
+          "namespace": "web",
+          "annotations": {
+            "deployment.kubernetes.io/revision": "9"
+          }
+        },
+        "spec": {
+          "replicas": 6
+        },
+        "status": {
+          "replicas": 6,
+          "availableReplicas": 6,
+          "conditions": []
+        }
+      },
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "coredns",
+          "namespace": "kube-system",
+          "annotations": {
+            "deployment.kubernetes.io/revision": "5"
+          }
+        },
+        "spec": {
+          "replicas": 2
+        },
+        "status": {
+          "replicas": 2,
+          "availableReplicas": 1,
+          "conditions": []
+        }
+      }
+    ]
+  },
+  "events": {
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": {
+          "namespace": "analytics"
+        },
+        "involvedObject": {
+          "kind": "Pod",
+          "name": "ingest-9f8e7d6c5b-hh2pp",
+          "namespace": "analytics"
+        },
+        "reason": "FailedScheduling",
+        "message": "0/3 nodes are available: 3 Insufficient memory.",
+        "type": "Warning"
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": {
+          "namespace": "payments"
+        },
+        "involvedObject": {
+          "kind": "Pod",
+          "name": "checkout-7d9f4c8b6-x2klm",
+          "namespace": "payments"
+        },
+        "reason": "BackOff",
+        "message": "Back-off restarting failed container",
+        "type": "Warning"
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": {
+          "namespace": "jobs"
+        },
+        "involvedObject": {
+          "kind": "Pod",
+          "name": "report-worker-6b8c9d2e1f-qq7ws",
+          "namespace": "jobs"
+        },
+        "reason": "Failed",
+        "message": "Failed to pull image: manifest unknown",
+        "type": "Warning"
+      }
+    ]
+  }
+}
