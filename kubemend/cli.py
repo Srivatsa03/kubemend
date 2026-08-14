@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 
+from .gitops import GitError, GitOpsRepo
 from .model import Autonomy, Severity
 from .plan import propose, unaddressed
 from .safety import CONSERVATIVE, STAGING, gate
@@ -97,6 +98,87 @@ def render(findings, decisions, orphans, policy_name: str, color: bool) -> str:
     return "\n".join(lines)
 
 
+def remediate(args) -> int:
+    """Diagnose, gate, and write the permitted plans to a GitOps repository.
+
+    Policy still decides everything: a plan refused by the gate is never
+    rendered, and a plan held at 'propose' becomes a branch rather than a commit
+    on the mainline. --dry-run overrides all of it downward, never upward.
+    """
+    if args.snapshot:
+        with open(args.snapshot, encoding="utf-8") as fh:
+            snapshot = json.load(fh)
+    else:
+        snapshot = collect(args.namespace, args.context)
+
+    try:
+        repo = GitOpsRepo(args.repo)
+    except GitError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    findings = detect(snapshot)
+    plans = propose(findings, snapshot)
+    policy = POLICIES[args.policy]
+    use_color = sys.stdout.isatty() and not args.no_color and not os.environ.get("NO_COLOR")
+    c = _color(use_color)
+    DIM, BOLD = "2", "1"
+
+    print(c(BOLD, f"\n  kubemend remediate") +
+          c(DIM, f"   {len(plans)} incident(s), policy '{args.policy}', repo {repo.path.name}\n"))
+
+    written = 0
+    for plan in plans:
+        target = next(iter(plan.targets))
+        verdict = gate(plan, policy, recent_plans=args.recent_plans)
+        if not verdict.allowed:
+            print(f"    {c('31;1', '✗')} {c('31;1', 'REFUSED ')} {target}")
+            for v in verdict.violations:
+                print(f"        {c(DIM, '· ' + v.message)}")
+            print()
+            continue
+
+        autonomy = Autonomy.REPORT if args.dry_run else verdict.autonomy
+        try:
+            emission = repo.emit(plan, autonomy)
+        except GitError as exc:
+            print(f"    {c('31;1', '✗')} {c('31;1', 'ERROR   ')} {target}\n        {exc}\n",
+                  file=sys.stderr)
+            return 2
+
+        label = "DRY RUN" if args.dry_run else autonomy.value.upper()
+        tone = AUTONOMY_COLOR[autonomy]
+        print(f"    {c(tone, '✓')} {c(tone, f'{label:<8}')} {target}")
+        for change in emission.applied:
+            print(f"        {change.detail}")
+        for change in emission.skipped:
+            print(f"        {c(DIM, '· not written: ' + change.skipped_reason)}")
+        if emission.committed:
+            written += 1
+            print(f"        {c(DIM, f'commit {emission.commit[:8]} on {emission.branch}')}")
+        elif emission.applied:
+            print(f"        {c(DIM, 'rendered only; nothing committed')}")
+        if emission.diff:
+            for line in emission.diff.splitlines():
+                if line.startswith(("+++", "---", "diff ", "index ", "@@")):
+                    continue
+                if line.startswith("+"):
+                    print("        " + c("32;1", line))
+                elif line.startswith("-"):
+                    print("        " + c("31;1", line))
+        print()
+
+    orphans = unaddressed(findings, plans)
+    if orphans:
+        print(c(BOLD, "  no automated fix") + c(DIM, "   reported for a human\n"))
+        for t_ in sorted({str(f.target) for f in orphans}):
+            print(f"    {c(DIM, '· ' + t_)}")
+        print()
+
+    print(c(DIM, f"  {written} commit(s) written.\n"))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kubemend",
@@ -123,6 +205,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on", choices=[s.value for s in Severity],
         help="exit non-zero if a finding at or above this severity exists",
     )
+
+    rem = sub.add_parser(
+        "remediate",
+        help="write the permitted plans to a GitOps repository as commits",
+    )
+    src2 = rem.add_mutually_exclusive_group()
+    src2.add_argument("--snapshot", help="read recorded cluster JSON instead of a live cluster")
+    src2.add_argument("--context", help="kubectl context to read from")
+    rem.add_argument("--repo", required=True, help="path to the GitOps repository checkout")
+    rem.add_argument("-n", "--namespace", help="limit to one namespace (default: all)")
+    rem.add_argument(
+        "--policy", choices=list(POLICIES), default="conservative",
+        help="which policy governs the plans (default: conservative)",
+    )
+    rem.add_argument(
+        "--recent-plans", type=int, default=0,
+        help="plans already applied this window, for flap protection",
+    )
+    rem.add_argument(
+        "--dry-run", action="store_true",
+        help="render the diffs and revert, committing nothing whatever policy allows",
+    )
+    rem.add_argument("--no-color", action="store_true")
 
     snap = sub.add_parser("snapshot", help="record cluster state to a file for offline analysis")
     snap.add_argument("--out", default="snapshot.json")
@@ -157,6 +262,9 @@ def main(argv: list[str] | None = None) -> int:
         counts = {k: len((v or {}).get("items", [])) for k, v in snapshot.items()}
         print(f"wrote {args.out}: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
         return 0
+
+    if args.command == "remediate":
+        return remediate(args)
 
     if args.snapshot:
         with open(args.snapshot, encoding="utf-8") as fh:

@@ -118,6 +118,7 @@ def _raise_memory(target: Target, finding: Finding, dep: dict) -> Action | None:
         after={"memory": format_quantity(current * 2)},
         reason=f"container was OOMKilled at {limits['memory']}",
         impacted_pods=_replicas(dep),
+        container=str(finding.evidence.get("container") or ""),
     )
 
 

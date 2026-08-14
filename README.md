@@ -48,6 +48,52 @@ kubemend diagnose -n payments           # one namespace
 kubemend snapshot --out cluster.json    # record now, analyse later
 ```
 
+## Writing the fix
+
+The agent has no cluster credentials and makes no API calls. It edits a manifest in your GitOps repository and commits; Argo CD or Flux carries the change to the cluster. Everything the repository already gives you then applies to the agent for free — an audit trail, review before rollout, and a revert that is one command.
+
+```bash
+kubemend remediate --snapshot cluster.json --repo ~/gitops --dry-run
+kubemend remediate --repo ~/gitops              # against a live cluster
+```
+
+```
+    ✓ APPLY    payments/deployment/checkout
+        restored clusters/prod/checkout.yaml to fee63e44
+        commit fc5d427c on main
+        -          image: reg.internal/checkout:2.4.0   # last known good
+        +          image: reg.internal/checkout:2.3.0   # last known good
+
+    ✓ PROPOSE  payments/deployment/api
+        spec.template.spec.containers.api.resources.limits.memory: 256Mi -> 512Mi
+        commit 0efe9c6 on kubemend/payments-api
+
+    ✗ REFUSED  kube-system/deployment/coredns
+        · kube-system is protected
+```
+
+Policy decides the destination, not just permission: a rollback trusted to `apply` commits to the mainline, a resource change held at `propose` becomes a branch to review, and a refused plan is never rendered at all.
+
+### Rollback is a git operation
+
+In a GitOps repository the manifest is the source of truth, so returning a workload to its previous revision means restoring the file to its previous committed state. Nothing is reconstructed — the prior version is in the history, byte for byte, comments and all. This falls out of the architecture rather than being engineered, and it is the strongest reason to route an agent's actions through git.
+
+### The diff is one line
+
+The obvious way to edit a manifest is to parse the YAML, mutate the object, and dump it back. That produces a correct file and a useless commit: the dumper rewrites the whole document, drops comments, reorders keys, and normalises quoting, so a reviewer sees three hundred changed lines when the change was one number.
+
+The entire value of routing actions through git is that a human can read the diff before it reaches the cluster, so edits are surgical. Trailing comments survive, including the exact spacing before them.
+
+### It refuses more than it writes
+
+- **A workload with no manifest** is reported, never created.
+- **A value that drifted** — the repo says something other than what the cluster reported — is left alone. Somebody changed it, and their change is not the agent's to discard.
+- **A field that does not exist** is not added. Inventing a resource limit the author never wrote is a different kind of change from adjusting one that is there.
+- **An action with no manifest representation**, such as a rolling restart, is refused with a reason rather than approximated.
+- **A dirty working tree** blocks emission entirely, so an agent's commit never absorbs someone's in-progress edit.
+
+Every commit carries the evidence that produced it — the findings, the reason, the blast radius, what was deliberately left alone — and ends with the line that matters: `Undo: git revert this commit.`
+
 ## The design
 
 ### Typed actions, not commands
@@ -99,10 +145,10 @@ In the demo above, **10 of 13 findings produce no action at all.** A missing Con
 
 ## Status
 
-Early. Detection, planning and the policy gate are implemented and tested (76 tests, no dependencies). The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
+Early. Detection, planning, the policy gate and GitOps emission are implemented and tested (105 tests, no dependencies). The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
 
 Not yet built:
-- Writing plans out as GitOps commits and pull requests
+- Opening a pull request from the branch (the branch and commit exist; `gh pr create` does not run yet)
 - Verifying the fix worked, and auto-reverting when it did not
 - A model layer for correlating findings and writing incident narrative
 - StatefulSets, DaemonSets, Jobs; node-level and networking signals

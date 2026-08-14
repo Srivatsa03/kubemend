@@ -1,0 +1,360 @@
+"""Turn a plan into a commit against a GitOps repository.
+
+This is where the project's central claim becomes true rather than described.
+The agent has no cluster credentials and issues no API calls; it edits a
+manifest and commits, and whatever reconciles that repository — Argo CD, Flux —
+carries the change to the cluster. Everything a GitOps repository already gives
+you then applies to the agent for free: an audit trail, review before rollout,
+and a revert that is one command.
+
+Two consequences shape the code.
+
+**Rollback is a git operation, not an edit.** In a repository the manifest is
+the source of truth, so returning a workload to its previous revision means
+restoring the file to its previous committed state. There is nothing to
+compute: the prior state is in the history, exactly as it was, comments and
+all. This is the single strongest argument for routing actions through git, and
+it falls out rather than being engineered.
+
+**Not every action is expressible.** A rolling restart is a Kubernetes verb with
+no manifest representation unless the workload already carries a restart
+annotation, and inventing fields the author never wrote is not a change this may
+make unattended. Those actions are refused with a reason rather than
+approximated, which leaves them to a human — the same outcome the planner
+already produces for findings it cannot safely fix.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .manifest import ManifestError, _walk, read_field, set_field
+from .model import Action, ActionKind, Autonomy, Plan, Target
+
+__all__ = ["GitError", "GitOpsRepo", "Change", "Emission", "field_path_for"]
+
+# Files worth searching for a workload definition.
+MANIFEST_SUFFIXES = (".yaml", ".yml")
+
+# Directories that never contain hand-maintained manifests.
+SKIP_DIRS = {".git", "node_modules", ".venv", "vendor", ".terraform"}
+
+
+class GitError(RuntimeError):
+    """A git command failed, or the repository is not in a usable state."""
+
+
+def _git(repo: Path, *args: str, check: bool = True) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=30
+    )
+    if check and result.returncode != 0:
+        raise GitError(f"git {' '.join(args)}: {result.stderr.strip() or result.stdout.strip()}")
+    return result.stdout
+
+
+def field_path_for(action: Action) -> tuple[str, ...] | None:
+    """Where in a workload manifest this action's change lives.
+
+    Returns None for actions with no manifest representation, which the caller
+    must treat as "not expressible here" rather than as an error.
+    """
+    pod = ("spec", "template", "spec")
+    if action.kind is ActionKind.SCALE:
+        return ("spec", "replicas")
+    if action.kind is ActionKind.SET_RESOURCES:
+        key = next(iter(action.after), "")
+        return pod + ("containers", action.container, "resources", "limits", key)
+    if action.kind is ActionKind.SET_IMAGE:
+        return pod + ("containers", action.container, "image")
+    # ROLLBACK is handled through history; RESTART and SET_PROBE have no
+    # dependable manifest field to edit.
+    return None
+
+
+@dataclass
+class Change:
+    """One action rendered against the repository, or the reason it could not be."""
+
+    action: Action
+    path: Path | None = None
+    diff: str = ""
+    detail: str = ""
+    skipped_reason: str = ""
+
+    @property
+    def applied(self) -> bool:
+        return self.path is not None and not self.skipped_reason
+
+
+@dataclass
+class Emission:
+    """The result of writing a plan to the repository."""
+
+    branch: str
+    changes: list[Change] = field(default_factory=list)
+    commit: str = ""
+    message: str = ""
+    committed: bool = False
+
+    @property
+    def applied(self) -> list[Change]:
+        return [c for c in self.changes if c.applied]
+
+    @property
+    def skipped(self) -> list[Change]:
+        return [c for c in self.changes if not c.applied]
+
+    @property
+    def diff(self) -> str:
+        return "\n".join(c.diff for c in self.applied if c.diff)
+
+
+class GitOpsRepo:
+    """A checkout of the repository that defines the cluster's desired state."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path).expanduser().resolve()
+        if not (self.path / ".git").exists():
+            raise GitError(f"{self.path} is not a git repository")
+        self._index: dict[Target, tuple[Path, tuple[int, int]]] | None = None
+
+    # --- locating ---------------------------------------------------------
+
+    def _manifests(self):
+        for candidate in sorted(self.path.rglob("*")):
+            if candidate.suffix not in MANIFEST_SUFFIXES or not candidate.is_file():
+                continue
+            if any(part in SKIP_DIRS for part in candidate.relative_to(self.path).parts):
+                continue
+            yield candidate
+
+    def locate(self, target: Target) -> tuple[Path, tuple[int, int]] | None:
+        """Find the file and document range defining ``target``.
+
+        Matched on kind, name and namespace from the manifest's own metadata
+        rather than on filename, because a repository laid out by team or by
+        environment will not name files after the workloads inside them.
+        """
+        if self._index is None:
+            self._index = {}
+            for candidate in self._manifests():
+                try:
+                    text = candidate.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                # Index every workload document in the file, not just the one
+                # being looked for, so later lookups cost nothing.
+                self._index_file(candidate, text)
+        return self._index.get(target)
+
+    def _index_file(self, path: Path, text: str) -> None:
+        assert self._index is not None
+        lines = text.splitlines()
+        bounds = [0] + [i + 1 for i, l in enumerate(lines) if l.rstrip() == "---" and i] + [len(lines)]
+        for start, end in zip(bounds, bounds[1:]):
+            kind = name = namespace = None
+            for _, _, field_path, _, value in _walk(lines[start:end]):
+                if field_path == ("kind",):
+                    kind = value
+                elif field_path == ("metadata", "name"):
+                    name = value
+                elif field_path == ("metadata", "namespace"):
+                    namespace = value
+            if kind in ("Deployment", "StatefulSet", "DaemonSet") and name:
+                self._index[Target(namespace or "default", kind, name)] = (path, (start, end))
+
+    # --- rendering --------------------------------------------------------
+
+    def render(self, action: Action) -> Change:
+        """Apply one action to the working tree, or explain why it cannot be."""
+        located = self.locate(action.target)
+        if located is None:
+            return Change(action, skipped_reason=f"no manifest defines {action.target}")
+        path, bounds = located
+
+        if action.kind is ActionKind.ROLLBACK:
+            return self._rollback(action, path)
+
+        field = field_path_for(action)
+        if field is None:
+            return Change(
+                action,
+                skipped_reason=(
+                    f"'{action.kind.value}' has no manifest field to edit; "
+                    "it needs a human or a cluster-side verb"
+                ),
+            )
+        if action.kind in (ActionKind.SET_RESOURCES, ActionKind.SET_IMAGE) and not action.container:
+            return Change(action, skipped_reason="action does not say which container to change")
+
+        text = path.read_text(encoding="utf-8")
+        current = read_field(text, field, bounds)
+        if current is None:
+            return Change(action, skipped_reason=f"{'.'.join(field)} is not set in {path.name}")
+
+        expected = str(next(iter(action.before.values()), ""))
+        if current != expected:
+            # The repository has moved since the cluster snapshot was taken.
+            # Editing anyway would overwrite whatever changed it.
+            return Change(
+                action,
+                skipped_reason=(
+                    f"{'.'.join(field)} is {current} in the repository but the cluster "
+                    f"reported {expected}; refusing to edit a stale value"
+                ),
+            )
+
+        try:
+            edit = set_field(text, field, str(next(iter(action.after.values()))), bounds)
+        except ManifestError as exc:
+            return Change(action, skipped_reason=str(exc))
+        path.write_text(edit.text, encoding="utf-8")
+        return Change(action, path=path, diff=self._diff(path), detail=edit.describe())
+
+    def _rollback(self, action: Action, path: Path) -> Change:
+        """Restore a manifest to its previous committed state.
+
+        The prior revision is already in the history, byte for byte. Nothing is
+        reconstructed, which is why this is the action trusted earliest.
+        """
+        relative = path.relative_to(self.path).as_posix()
+        history = _git(self.path, "log", "--format=%H", "--", relative).split()
+        if len(history) < 2:
+            return Change(
+                action,
+                skipped_reason=(
+                    f"{relative} has no earlier commit to roll back to "
+                    f"({len(history)} in history)"
+                ),
+            )
+        previous = history[1]
+        restored = _git(self.path, "show", f"{previous}:{relative}")
+        if restored == path.read_text(encoding="utf-8"):
+            return Change(action, skipped_reason=f"{relative} already matches {previous[:8]}")
+        path.write_text(restored, encoding="utf-8")
+        return Change(
+            action,
+            path=path,
+            diff=self._diff(path),
+            detail=f"restored {relative} to {previous[:8]}",
+        )
+
+    def _diff(self, path: Path) -> str:
+        return _git(self.path, "diff", "--", str(path.relative_to(self.path))).rstrip()
+
+    # --- committing -------------------------------------------------------
+
+    def emit(
+        self,
+        plan: Plan,
+        autonomy: Autonomy,
+        *,
+        branch: str | None = None,
+        author: str = "kubemend <kubemend@localhost>",
+    ) -> Emission:
+        """Render a plan and, unless reporting only, commit it.
+
+        ``autonomy`` decides the destination, not whether the work happens:
+        REPORT renders the diff and reverts the working tree, PROPOSE commits to
+        a new branch for review, APPLY commits to the current branch.
+        """
+        if self.dirty():
+            raise GitError(
+                "the repository has uncommitted changes; refusing to mix them with a plan"
+            )
+
+        target = next(iter(plan.targets), None)
+        default = f"kubemend/{target.namespace}-{target.name}" if target else "kubemend/plan"
+        emission = Emission(branch=branch or default)
+
+        original = self.current_branch()
+        if autonomy is Autonomy.PROPOSE:
+            _git(self.path, "checkout", "-b", emission.branch)
+        else:
+            # APPLY and REPORT stay where they are; naming a branch that was
+            # never created would misreport where the change landed.
+            emission.branch = original
+
+        try:
+            for action in plan.actions:
+                emission.changes.append(self.render(action))
+            emission.message = self.message_for(plan, emission)
+
+            if autonomy is Autonomy.REPORT or not emission.applied:
+                # Leave the tree as we found it: a report changes nothing.
+                _git(self.path, "checkout", "--", ".")
+                if autonomy is Autonomy.PROPOSE:
+                    _git(self.path, "checkout", original)
+                    _git(self.path, "branch", "-D", emission.branch, check=False)
+                    emission.branch = original
+                return emission
+
+            for change in emission.applied:
+                _git(self.path, "add", str(change.path.relative_to(self.path)))
+            _git(self.path, "-c", f"user.name={author.split(' <')[0]}",
+                 "-c", f"user.email={author.split('<')[1].rstrip('>')}",
+                 "commit", "-m", emission.message)
+            emission.commit = _git(self.path, "rev-parse", "HEAD").strip()
+            emission.committed = True
+            if autonomy is Autonomy.PROPOSE:
+                _git(self.path, "checkout", original)
+        except Exception:
+            _git(self.path, "checkout", "--", ".", check=False)
+            if autonomy is Autonomy.PROPOSE and self.current_branch() != original:
+                _git(self.path, "checkout", original, check=False)
+                _git(self.path, "branch", "-D", emission.branch, check=False)
+            raise
+        return emission
+
+    def message_for(self, plan: Plan, emission: Emission) -> str:
+        """A commit message a reviewer can act on without opening the tool.
+
+        Carries the evidence, not just the change: what was observed, what is
+        being done about it, how to undo it, and what was deliberately left
+        alone.
+        """
+        target = next(iter(plan.targets), None)
+        subject = f"{plan.actions[0].kind.value} {target}" if target else "kubemend plan"
+        lines = [subject, ""]
+
+        lines.append("Observed:")
+        for finding in plan.findings:
+            lines.append(f"  [{finding.severity.value}] {finding.summary}")
+
+        if emission.applied:
+            lines += ["", "Changed:"]
+            for change in emission.applied:
+                lines.append(f"  {change.detail}")
+                lines.append(f"    reason: {change.action.reason}")
+                # The per-action inverse describes a field swap, which is only
+                # what happened for an edit. A rollback restored a file from
+                # history, and quoting a cluster revision number for it would
+                # point a reader at the wrong thing.
+                if change.action.kind is not ActionKind.ROLLBACK and change.action.reversible:
+                    lines.append(f"    undo:   {change.action.inverse().describe()}")
+
+        if emission.skipped:
+            lines += ["", "Not changed:"]
+            for change in emission.skipped:
+                lines.append(f"  {change.action.kind.value}: {change.skipped_reason}")
+
+        lines += [
+            "",
+            f"Blast radius: {plan.impacted_pods} pod(s) across {len(plan.targets)} workload(s).",
+            # True of every commit here, and the reason the actions travel this
+            # way at all: undoing the agent is the same operation as undoing any
+            # other change to the repository.
+            "Undo: git revert this commit.",
+        ]
+        return "\n".join(lines) + "\n"
+
+    # --- state ------------------------------------------------------------
+
+    def current_branch(self) -> str:
+        return _git(self.path, "rev-parse", "--abbrev-ref", "HEAD").strip()
+
+    def dirty(self) -> bool:
+        return bool(_git(self.path, "status", "--porcelain").strip())

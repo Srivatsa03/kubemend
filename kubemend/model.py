@@ -143,6 +143,11 @@ class Action:
     reason: str
     # Pods expected to be replaced or disrupted by applying this.
     impacted_pods: int = 0
+    # Which container the change lands on. Empty when the action is
+    # workload-level (scaling, rollback). Without it a manifest edit against a
+    # multi-container pod would have to guess, and guessing which container to
+    # give more memory is not a guess worth making.
+    container: str = ""
 
     @property
     def reversible(self) -> bool:
@@ -166,6 +171,7 @@ class Action:
             after=dict(self.before),
             reason=f"revert: {self.reason}",
             impacted_pods=self.impacted_pods,
+            container=self.container,
         )
 
     def describe(self) -> str:
