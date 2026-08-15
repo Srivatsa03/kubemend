@@ -1,5 +1,10 @@
 # kubemend
 
+![ci](https://github.com/Srivatsa03/kubemend/actions/workflows/ci.yml/badge.svg)
+![license](https://img.shields.io/badge/license-Apache--2.0-blue)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![deps](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen)
+
 **A Kubernetes SRE agent whose only write surface is a git commit.**
 
 Every AI SRE tool will read your cluster and tell you what it thinks is wrong. Almost none of them are trusted to *act*, and the reason is not model quality. It is that nobody has a convincing answer to "what stops it doing something catastrophic at 3am," and "the model is usually careful" is not an answer.
@@ -7,28 +12,21 @@ Every AI SRE tool will read your cluster and tell you what it thinks is wrong. A
 kubemend is an attempt at the answer. It diagnoses freely and acts narrowly, and every constraint on it is code with tests rather than a prompt.
 
 ```
-  remediation   one plan per incident, gated independently
-
     ✓ APPLY    payments/deployment/checkout
-        rollback payments/deployment/checkout (revision: 12 -> 11)
-        ↳ rollout_stuck: rollout of checkout exceeded its progress deadline
-        undo: rollback payments/deployment/checkout (revision: 11 -> 12)
+        restored clusters/prod/checkout.yaml to 808ce5f3
+        commit bea2ee38 on main
+        -          image: nginx:1.27-alpine-typo   # known good
+        +          image: nginx:1.27-alpine   # known good
 
     ✓ PROPOSE  payments/deployment/api
-        set_resources payments/deployment/api (memory: '256Mi' -> '512Mi')
-        ↳ container was OOMKilled at 256Mi
-        · [autonomy_ceiling] held at 'propose' by action(s): set_resources
+        spec.template.spec.containers.api.resources.limits.memory: 256Mi -> 512Mi
+        commit 0efe9c6 on kubemend/payments-api
 
     ✗ REFUSED  kube-system/deployment/coredns
-        rollback kube-system/deployment/coredns (revision: 5 -> 4)
-        · [protected_namespace] kube-system is protected
-
-  no automated fix   reported for a human
-
-    · jobs/deployment/emailer            config_error, replica_shortfall
-    · analytics/deployment/ingest        replica_shortfall, unschedulable
-    · web/deployment/frontend            flapping
+        · kube-system is protected
 ```
+
+It has no cluster credentials and issues no write to the Kubernetes API. It reads the cluster, edits a manifest in your GitOps repository, and commits; the reconciler you already run does the rest. Undoing it is `git revert`.
 
 ## Watch it work
 

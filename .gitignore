@@ -9,3 +9,7 @@ dist/
 .DS_Store
 *.kubeconfig
 snapshots/
+
+dist/
+build/
+*.egg-info/
