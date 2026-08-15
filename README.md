@@ -59,7 +59,25 @@ It stands up a k3d cluster and a git repository holding its manifests, applies t
    deployment "checkout" successfully rolled out
 ```
 
-The agent never called the Kubernetes API to change anything. It read the cluster, restored a file to its previous committed state, and committed. `kubectl apply` in the last step stands in for the reconciler you would already be running.
+Then it does the harder half. With `--verify` it watches the workload after committing, and the demo's second scenario ships **two** bad releases in a row so that rolling back one is not enough:
+
+```
+== 8. Now a fix that does NOT work
+      ✓ APPLY    payments/deployment/checkout
+          restored clusters/prod/checkout.yaml to 09ca0413
+          commit 3c102fc2 on main
+          watching for recovery...
+          still failing after 75s: cannot pull image nginx:1.27-broken-a
+          reverted in e5c31937
+    0 commit(s) written.
+
+== 9. It withdrew its own change
+   6ab284f Revert "rollback payments/deployment/checkout"
+   3c102fc rollback payments/deployment/checkout
+   5213ae4 bad release B
+```
+
+The agent never called the Kubernetes API to change anything. It read the cluster, committed a fix, watched, kept the one that worked and withdrew the one that did not. `kubectl apply` stands in for the reconciler you would already be running.
 
 CI runs this same script against a real cluster on every push, because a project whose claim is "it works against a real cluster" should not prove it with mocks.
 
@@ -127,6 +145,36 @@ The entire value of routing actions through git is that a human can read the dif
 
 Every commit carries the evidence that produced it — the findings, the reason, the blast radius, what was deliberately left alone — and ends with the line that matters: `Undo: git revert this commit.`
 
+## Verifying the fix
+
+A loop that stops at "committed" is half a loop: the agent acted on a diagnosis that may have been wrong, and until something checks, the cluster is in a state nobody has confirmed is an improvement.
+
+```bash
+kubemend remediate --repo ~/gitops --verify --verify-timeout 180
+```
+
+Recovery is defined narrowly — **the findings that motivated the change are gone, and no new critical finding has appeared on that workload.** Not "the pods are running", which is true moments before a crash loop starts. A workload must read clean **twice consecutively**, because a rollout looks briefly healthy as it begins.
+
+Three outcomes, and only one of them undoes anything:
+
+| Outcome | What it means | Reverts? |
+|---|---|---|
+| `recovered` | the motivating findings are gone | no |
+| `still_failing` | they remain, or a new critical one appeared | **yes** |
+| `indeterminate` | the cluster could not be read | no |
+
+The last row is the one worth arguing about. Reverting on evidence of continued failure is right. Reverting because the API server was briefly unreachable would undo a fix that may have worked, on no evidence, turning a network blip into a second production change. **Silence is not success, but it is not failure either** — an unverifiable outcome stops and asks for a human, and a failed read even breaks the recovery streak rather than bridging two clean ones.
+
+When it does revert, it uses `git revert` rather than a reset. The history of an automated system acting on production is worth keeping, and a reviewer should see both that it acted and that it withdrew.
+
+## Opening a pull request
+
+```bash
+kubemend remediate --repo ~/gitops --pr
+```
+
+Plans held at `propose` push their branch and open a PR whose body is the commit message — evidence, reason, blast radius, and what was left alone. A repository with no remote, or a missing `gh`, is reported rather than treated as an error, since that is the normal case for a local checkout.
+
 ## The design
 
 ### Typed actions, not commands
@@ -178,11 +226,9 @@ In the demo above, **10 of 13 findings produce no action at all.** A missing Con
 
 ## Status
 
-Early. Detection, planning, the policy gate and GitOps emission are implemented and tested (105 tests, no dependencies). The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
+Detection, planning, the policy gate, GitOps emission, pull requests and post-change verification with auto-revert are implemented and tested (118 tests, no dependencies). CI runs the full loop against a real k3d cluster on every push. The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
 
 Not yet built:
-- Opening a pull request from the branch (the branch and commit exist; `gh pr create` does not run yet)
-- Verifying the fix worked, and auto-reverting when it did not
 - A model layer for correlating findings and writing incident narrative
 - StatefulSets, DaemonSets, Jobs; node-level and networking signals
 

@@ -353,3 +353,45 @@ def test_a_rollback_does_not_quote_a_cluster_revision_as_its_undo(repo):
     message = git(repo, "log", "-1", "--format=%B")
     assert "restored" in message
     assert "undo:   rollback" not in message
+
+
+# --- undoing and proposing ---------------------------------------------------
+
+
+def test_revert_undoes_our_commit_with_another_commit(repo):
+    """History of an automated system acting on production is worth keeping, so
+    it withdraws with a revert rather than a reset."""
+    r = GitOpsRepo(repo)
+    emission = r.emit(plan_of(scale()), Autonomy.APPLY)
+    manifest = repo / "clusters/prod/checkout.yaml"
+    assert "replicas: 5" in manifest.read_text()
+
+    r.revert(emission.commit, "still failing after 180s")
+    assert "replicas: 3" in manifest.read_text()
+    log = git(repo, "log", "--format=%s")
+    assert log.splitlines()[0].startswith("Revert")
+    assert emission.commit[:8] in git(repo, "log", "-1", "--format=%B")
+
+
+def test_the_revert_message_says_why(repo):
+    r = GitOpsRepo(repo)
+    emission = r.emit(plan_of(scale()), Autonomy.APPLY)
+    r.revert(emission.commit, "still failing after 180s")
+    body = git(repo, "log", "-1", "--format=%B")
+    assert "did not confirm recovery" in body
+    assert "still failing after 180s" in body
+
+
+def test_a_local_repo_reports_that_it_cannot_open_a_pull_request(repo):
+    """No remote is the normal case for a demo, not an error."""
+    r = GitOpsRepo(repo)
+    emission = r.emit(plan_of(scale()), Autonomy.PROPOSE)
+    assert r.open_pull_request(emission) == ""
+    assert "no git remote" in emission.pr_note
+
+
+def test_nothing_to_propose_when_no_branch_commit_was_made(repo):
+    r = GitOpsRepo(repo)
+    emission = r.emit(plan_of(scale()), Autonomy.APPLY)   # lands on main
+    assert r.open_pull_request(emission) == ""
+    assert "nothing to propose" in emission.pr_note

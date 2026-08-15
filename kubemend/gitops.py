@@ -98,6 +98,8 @@ class Emission:
     commit: str = ""
     message: str = ""
     committed: bool = False
+    pr_url: str = ""
+    pr_note: str = ""
 
     @property
     def applied(self) -> list[Change]:
@@ -350,6 +352,74 @@ class GitOpsRepo:
             "Undo: git revert this commit.",
         ]
         return "\n".join(lines) + "\n"
+
+    # --- undoing and proposing --------------------------------------------
+
+    def revert(self, commit: str, reason: str) -> str:
+        """Undo one of our own commits with a new commit.
+
+        ``git revert`` rather than a reset: the history of an automated system
+        acting on production is worth keeping, and a reviewer looking later
+        should see both that it acted and that it withdrew.
+        """
+        _git(self.path, "-c", "user.name=kubemend", "-c", "user.email=kubemend@localhost",
+             "revert", "--no-edit", commit)
+        head = _git(self.path, "rev-parse", "HEAD").strip()
+        _git(self.path, "-c", "user.name=kubemend", "-c", "user.email=kubemend@localhost",
+             "commit", "--amend", "--no-edit", "-m",
+             f"Revert \"{self._subject(commit)}\"\n\n"
+             f"Verification did not confirm recovery: {reason}\n\n"
+             f"This reverts {commit[:8]}. The cluster is back to the state a human\n"
+             f"last approved, which is where an unverified automated change belongs.\n")
+        return head
+
+    def _subject(self, commit: str) -> str:
+        return _git(self.path, "log", "-1", "--format=%s", commit).strip()
+
+    def has_remote(self) -> bool:
+        return bool(_git(self.path, "remote", check=False).strip())
+
+    def open_pull_request(self, emission: Emission, base: str | None = None) -> str:
+        """Push the branch and open a pull request, if that is possible here.
+
+        Returns the PR URL, or an empty string with the reason recorded on the
+        emission. A local repository with no remote is the normal case for a
+        demo and for a dry run, so it is not an error.
+        """
+        if not emission.committed or not emission.branch.startswith("kubemend/"):
+            emission.pr_note = "nothing to propose: no branch commit was made"
+            return ""
+        if not self.has_remote():
+            emission.pr_note = "no git remote; branch exists locally only"
+            return ""
+
+        try:
+            _git(self.path, "push", "-u", "origin", emission.branch)
+        except GitError as exc:
+            emission.pr_note = f"could not push the branch: {exc}"
+            return ""
+
+        base = base or self._default_base()
+        result = subprocess.run(
+            ["gh", "pr", "create", "--base", base, "--head", emission.branch,
+             "--title", emission.message.splitlines()[0],
+             "--body", emission.message],
+            cwd=str(self.path), capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            emission.pr_note = (
+                "branch pushed; `gh` is not installed or not authenticated"
+                if "not found" in stderr or "gh auth" in stderr
+                else f"branch pushed; gh pr create failed: {stderr[:160]}"
+            )
+            return ""
+        emission.pr_url = result.stdout.strip().splitlines()[-1]
+        return emission.pr_url
+
+    def _default_base(self) -> str:
+        head = _git(self.path, "symbolic-ref", "refs/remotes/origin/HEAD", check=False).strip()
+        return head.rsplit("/", 1)[-1] if head else "main"
 
     # --- state ------------------------------------------------------------
 

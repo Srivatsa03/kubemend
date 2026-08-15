@@ -4,46 +4,51 @@
    k3d-kubemend-demo-server-0  Ready
 
 == 2. A git repository holding the desired state
+   Waiting for deployment "checkout" rollout to finish: 0 out of 2 new replicas have been updated...
+   Waiting for deployment "checkout" rollout to finish: 0 of 2 updated replicas are available...
+   Waiting for deployment "checkout" rollout to finish: 1 of 2 updated replicas are available...
    deployment "checkout" successfully rolled out
 
 == 3. A release goes out, and it is wrong
    waiting for the cluster to notice...
-   checkout-6d78fb9788-qpbmw  ImagePullBackOff
-   checkout-7bbdcbc9b7-dcdb8  Running
-   checkout-7bbdcbc9b7-llqm5  Running
+   checkout-6d78fb9788-vlpqf  ErrImagePull
+   checkout-7bbdcbc9b7-6t6qv  Running
+   checkout-7bbdcbc9b7-l4txv  Running
 
 == 4. kubemend reads the cluster (read-only)
     kubemend   1 finding(s), 1 incident(s), policy 'conservative'
     critical  payments/deployment/checkout       image_pull
-              cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+              cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-vlpqf
     remediation   one plan per incident, gated independently
       ✓ APPLY    payments/deployment/checkout
-          rollback payments/deployment/checkout (revision: 4 -> 3)
-          ↳ image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
-          undo: rollback payments/deployment/checkout (revision: 3 -> 4)
+          rollback payments/deployment/checkout (revision: 2 -> 1)
+          ↳ image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-vlpqf
+          undo: rollback payments/deployment/checkout (revision: 1 -> 2)
 
-== 5. kubemend writes the fix to the repository
+== 5. kubemend writes the fix, then watches to see whether it worked
     kubemend remediate   1 incident(s), policy 'conservative', repo kubemend-gitops
       ✓ APPLY    payments/deployment/checkout
-          restored clusters/prod/checkout.yaml to 808ce5f3
-          commit bea2ee38 on main
+          restored clusters/prod/checkout.yaml to 8cdeb40a
+          commit dabe3219 on main
           -          image: nginx:1.27-alpine-typo   # known good
           +          image: nginx:1.27-alpine   # known good
+          watching for recovery...
+          recovered after 26s
     1 commit(s) written.
 
 == 6. The commit it produced
-   commit bea2ee38621c6b04591bdd509ddbf84c9c571ca2
+   commit dabe321943c2296f6ec913345937f535805d4733
    Author: kubemend <kubemend@localhost>
-   Date:   Sat Aug 15 10:43:08 2026 -0500
+   Date:   Sat Aug 15 11:07:20 2026 -0500
    
        rollback payments/deployment/checkout
        
        Observed:
-         [critical] cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+         [critical] cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-vlpqf
        
        Changed:
-         restored clusters/prod/checkout.yaml to 808ce5f3
-           reason: image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+         restored clusters/prod/checkout.yaml to 8cdeb40a
+           reason: image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-vlpqf
        
        Blast radius: 2 pod(s) across 1 workload(s).
        Undo: git revert this commit.
@@ -51,13 +56,35 @@
     clusters/prod/checkout.yaml | 2 +-
     1 file changed, 1 insertion(+), 1 deletion(-)
 
-== 7. The reconciler applies the repository, and the cluster recovers
+== 7. The cluster, afterwards
    deployment "checkout" successfully rolled out
-   checkout-6d78fb9788-qpbmw  Terminating
-   checkout-7bbdcbc9b7-dcdb8  Running
-   checkout-7bbdcbc9b7-llqm5  Running
+   checkout-7bbdcbc9b7-6t6qv  Running
+   checkout-7bbdcbc9b7-l4txv  Running
+
+== 8. Now a fix that does NOT work
+   two bad releases in a row, so rolling back one is not enough
+   checkout-598f76497b-49cvn  ImagePullBackOff
+   checkout-7bbdcbc9b7-6t6qv  Running
+   checkout-7bbdcbc9b7-l4txv  Running
+    kubemend remediate   1 incident(s), policy 'conservative', repo kubemend-gitops
+      ✓ APPLY    payments/deployment/checkout
+          restored clusters/prod/checkout.yaml to 09ca0413
+          commit 3c102fc2 on main
+          -          image: nginx:1.27-broken-b   # known good
+          +          image: nginx:1.27-broken-a   # known good
+          watching for recovery...
+          still failing after 75s: cannot pull image nginx:1.27-broken-a for checkout-78f8f7548c-pt7jx
+          reverted in e5c31937
+    0 commit(s) written.
+
+== 9. It withdrew its own change
+   6ab284f Revert "rollback payments/deployment/checkout"
+   3c102fc rollback payments/deployment/checkout
+   5213ae4 bad release B
+   the repository is back to the state a human last approved
 
 == Done
 The agent never called the Kubernetes API to change anything.
-Undo the whole thing with: git -C /tmp/kubemend-gitops revert HEAD
+It read the cluster, committed a fix, watched, kept the one that worked,
+and reverted the one that did not.
 cluster kubemend-demo left running; k3d cluster delete kubemend-demo to remove

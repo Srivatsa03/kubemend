@@ -19,6 +19,7 @@ from .model import Autonomy, Severity
 from .plan import propose, unaddressed
 from .safety import CONSERVATIVE, STAGING, gate
 from .signals import detect
+from .verify import Outcome, verify
 
 POLICIES = {"conservative": CONSERVATIVE, "staging": STAGING}
 
@@ -156,6 +157,9 @@ def remediate(args) -> int:
         if emission.committed:
             written += 1
             print(f"        {c(DIM, f'commit {emission.commit[:8]} on {emission.branch}')}")
+            if args.pr and autonomy is Autonomy.PROPOSE:
+                url = repo.open_pull_request(emission)
+                print(f"        {c(DIM, url or emission.pr_note)}")
         elif emission.applied:
             print(f"        {c(DIM, 'rendered only; nothing committed')}")
         if emission.diff:
@@ -166,6 +170,34 @@ def remediate(args) -> int:
                     print("        " + c("32;1", line))
                 elif line.startswith("-"):
                     print("        " + c("31;1", line))
+
+        # Verification only means anything for a change that actually reached
+        # the mainline. A branch awaiting review has not been applied to
+        # anything yet, so there is nothing to watch.
+        if args.verify and emission.committed and autonomy is Autonomy.APPLY:
+            print(f"        {c(DIM, 'watching for recovery...')}")
+            def read_cluster():
+                # collect() exits the process on a kubectl failure, which is
+                # right for a one-shot command and wrong here: losing the API
+                # server mid-watch is exactly the case verification is meant to
+                # report as indeterminate rather than die on.
+                try:
+                    return collect(args.namespace, args.context)
+                except SystemExit as exc:
+                    raise RuntimeError(str(exc)) from exc
+
+            result = verify(
+                target,
+                read_cluster,
+                motivating=plan.findings,
+                timeout=args.verify_timeout,
+            )
+            tone2 = "32;1" if result.healthy else "31;1"
+            print(f"        {c(tone2, result.explain())}")
+            if result.outcome.should_revert:
+                reverted = repo.revert(emission.commit, result.explain())
+                written -= 1
+                print(f"        {c('33', f'reverted in {reverted[:8]}')}")
         print()
 
     orphans = unaddressed(findings, plans)
@@ -226,6 +258,18 @@ def build_parser() -> argparse.ArgumentParser:
     rem.add_argument(
         "--dry-run", action="store_true",
         help="render the diffs and revert, committing nothing whatever policy allows",
+    )
+    rem.add_argument(
+        "--verify", action="store_true",
+        help="after applying, watch the workload and revert the commit if it does not recover",
+    )
+    rem.add_argument(
+        "--verify-timeout", type=float, default=180.0,
+        help="how long to wait for recovery before giving up (default: 180s)",
+    )
+    rem.add_argument(
+        "--pr", action="store_true",
+        help="push proposed branches and open a pull request (needs a remote and gh)",
     )
     rem.add_argument("--no-color", action="store_true")
 
