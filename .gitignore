@@ -10,6 +10,6 @@ dist/
 *.kubeconfig
 snapshots/
 
-dist/
-build/
-*.egg-info/
+# incident logs are local state, not source
+*.db
+*.db-journal

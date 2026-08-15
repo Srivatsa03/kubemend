@@ -19,6 +19,7 @@ CLUSTER=kubemend-demo
 REPO="${KUBEMEND_DEMO_REPO:-/tmp/kubemend-gitops}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KUBEMEND="${KUBEMEND_BIN:-$HERE/.venv/bin/kubemend}"
+JOURNAL="${KUBEMEND_DEMO_JOURNAL:-/tmp/kubemend-demo-journal.db}"
 KEEP=${1:-}
 
 blue() { printf "\033[36;1m\n== %s\033[0m\n" "$1"; }
@@ -47,6 +48,8 @@ kubectl get nodes --no-headers | awk '{print "   " $1 "  " $2}'
 # --- 2. the repository that defines it ----------------------------------------
 
 blue "2. A git repository holding the desired state"
+# A fresh journal, so the numbers at the end describe this run only.
+rm -f "$JOURNAL"
 rm -rf "$REPO" && mkdir -p "$REPO/clusters/prod"
 git -C "$REPO" init -q -b main
 git -C "$REPO" config user.email demo@kubemend
@@ -111,7 +114,7 @@ blue "5. kubemend writes the fix, then watches to see whether it worked"
 # not recover. The apply below stands in for the reconciler; in a real cluster
 # Argo or Flux would have picked the commit up on its own.
 ( sleep 12; kubectl apply -f "$REPO/clusters/prod/" >/dev/null 2>&1 ) &
-"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 120 --journal /tmp/live-journal.db --no-color \
+"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 120 --journal "$JOURNAL" --no-color \
   | sed '/^$/d;s/^/  /'
 wait
 
@@ -144,13 +147,22 @@ sleep 22
 kubectl -n payments get pods --no-headers | awk '{print "   " $1 "  " $3}'
 
 ( sleep 12; kubectl apply -f "$REPO/clusters/prod/" >/dev/null 2>&1 ) &
-"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 75 --journal /tmp/live-journal.db --no-color \
+"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 75 --journal "$JOURNAL" --no-color \
   | sed '/^$/d;s/^/  /'
 wait
 
 blue "9. It withdrew its own change"
 git -C "$REPO" log --oneline -3 | sed 's/^/   /'
 dim "   the repository is back to the state a human last approved"
+
+# --- 10. what it knows about itself -------------------------------------------
+#
+# Both outcomes above are one run each. The log is where they become a number:
+# two fixes written, one of which the agent had to withdraw.
+
+blue "10. What it knows about itself"
+"$KUBEMEND" log --journal "$JOURNAL" --no-color | sed '/^$/d;s/^/  /'
+dim "   the revert rate above is measured from those two outcomes, not claimed"
 
 blue "Done"
 dim "The agent never called the Kubernetes API to change anything."

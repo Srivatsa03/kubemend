@@ -77,7 +77,20 @@ Then it does the harder half. With `--verify` it watches the workload after comm
    5213ae4 bad release B
 ```
 
-The agent never called the Kubernetes API to change anything. It read the cluster, committed a fix, watched, kept the one that worked and withdrew the one that did not. `kubectl apply` stands in for the reconciler you would already be running.
+Then it prints what it now knows about itself:
+
+```
+== 10. What it knows about itself
+    incidents   2
+    committed   2
+    verified    1
+    revert rate 50%  (1 of 2 fixes did not hold)
+
+  keeps coming back   a rollback is not going to fix these
+      2x  payments/checkout
+```
+
+The agent never called the Kubernetes API to change anything. It read the cluster, committed a fix, watched, kept the one that worked and withdrew the one that did not — and the revert rate above is measured from those two outcomes rather than claimed. `kubectl apply` stands in for the reconciler you would already be running.
 
 CI runs this same script against a real cluster on every push, because a project whose claim is "it works against a real cluster" should not prove it with mocks.
 
