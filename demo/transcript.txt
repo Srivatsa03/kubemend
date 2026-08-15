@@ -1,0 +1,63 @@
+
+== 1. A cluster
+   k3d-kubemend-demo-agent-0  Ready
+   k3d-kubemend-demo-server-0  Ready
+
+== 2. A git repository holding the desired state
+   deployment "checkout" successfully rolled out
+
+== 3. A release goes out, and it is wrong
+   waiting for the cluster to notice...
+   checkout-6d78fb9788-qpbmw  ImagePullBackOff
+   checkout-7bbdcbc9b7-dcdb8  Running
+   checkout-7bbdcbc9b7-llqm5  Running
+
+== 4. kubemend reads the cluster (read-only)
+    kubemend   1 finding(s), 1 incident(s), policy 'conservative'
+    critical  payments/deployment/checkout       image_pull
+              cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+    remediation   one plan per incident, gated independently
+      ✓ APPLY    payments/deployment/checkout
+          rollback payments/deployment/checkout (revision: 4 -> 3)
+          ↳ image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+          undo: rollback payments/deployment/checkout (revision: 3 -> 4)
+
+== 5. kubemend writes the fix to the repository
+    kubemend remediate   1 incident(s), policy 'conservative', repo kubemend-gitops
+      ✓ APPLY    payments/deployment/checkout
+          restored clusters/prod/checkout.yaml to 808ce5f3
+          commit bea2ee38 on main
+          -          image: nginx:1.27-alpine-typo   # known good
+          +          image: nginx:1.27-alpine   # known good
+    1 commit(s) written.
+
+== 6. The commit it produced
+   commit bea2ee38621c6b04591bdd509ddbf84c9c571ca2
+   Author: kubemend <kubemend@localhost>
+   Date:   Sat Aug 15 10:43:08 2026 -0500
+   
+       rollback payments/deployment/checkout
+       
+       Observed:
+         [critical] cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+       
+       Changed:
+         restored clusters/prod/checkout.yaml to 808ce5f3
+           reason: image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+       
+       Blast radius: 2 pod(s) across 1 workload(s).
+       Undo: git revert this commit.
+   
+    clusters/prod/checkout.yaml | 2 +-
+    1 file changed, 1 insertion(+), 1 deletion(-)
+
+== 7. The reconciler applies the repository, and the cluster recovers
+   deployment "checkout" successfully rolled out
+   checkout-6d78fb9788-qpbmw  Terminating
+   checkout-7bbdcbc9b7-dcdb8  Running
+   checkout-7bbdcbc9b7-llqm5  Running
+
+== Done
+The agent never called the Kubernetes API to change anything.
+Undo the whole thing with: git -C /tmp/kubemend-gitops revert HEAD
+cluster kubemend-demo left running; k3d cluster delete kubemend-demo to remove

@@ -30,9 +30,44 @@ kubemend is an attempt at the answer. It diagnoses freely and acts narrowly, and
     · web/deployment/frontend            flapping
 ```
 
-## Try it
+## Watch it work
 
-No cluster needed. The repo ships a recorded snapshot of a cluster having a bad afternoon.
+One command, on a throwaway cluster. Needs `k3d`, `kubectl`, and a running Docker daemon.
+
+```bash
+demo/run.sh
+```
+
+It stands up a k3d cluster and a git repository holding its manifests, applies the repository the way Argo CD or Flux would, ships a release that breaks, and then lets kubemend read the cluster and write the fix back. The full recorded output is in [`demo/transcript.txt`](demo/transcript.txt); the middle of it looks like this:
+
+```
+== 3. A release goes out, and it is wrong
+   checkout-6d78fb9788-qpbmw  ImagePullBackOff
+   checkout-7bbdcbc9b7-dcdb8  Running
+
+== 4. kubemend reads the cluster (read-only)
+    critical  payments/deployment/checkout       image_pull
+              cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-qpbmw
+      ✓ APPLY    payments/deployment/checkout
+
+== 5. kubemend writes the fix to the repository
+      ✓ APPLY    payments/deployment/checkout
+          restored clusters/prod/checkout.yaml to 808ce5f3
+          commit bea2ee38 on main
+          -          image: nginx:1.27-alpine-typo   # known good
+          +          image: nginx:1.27-alpine   # known good
+
+== 7. The reconciler applies the repository, and the cluster recovers
+   deployment "checkout" successfully rolled out
+```
+
+The agent never called the Kubernetes API to change anything. It read the cluster, restored a file to its previous committed state, and committed. `kubectl apply` in the last step stands in for the reconciler you would already be running.
+
+CI runs this same script against a real cluster on every push, because a project whose claim is "it works against a real cluster" should not prove it with mocks.
+
+## Try it without a cluster
+
+The repo ships a recorded snapshot of a cluster having a bad afternoon, so the analysis path runs with nothing installed.
 
 ```bash
 pip install -e ".[dev]"
