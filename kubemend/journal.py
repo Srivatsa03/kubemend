@@ -165,6 +165,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _loads(raw: str):
+    try:
+        return json.loads(raw or "{}")
+    except json.JSONDecodeError:  # pragma: no cover - we wrote it
+        return {}
+
+
 class Journal:
     """A SQLite-backed record of runs. Safe to open concurrently; writes are small."""
 
@@ -331,6 +338,63 @@ class Journal:
                 (limit,),
             )
         ]
+
+    def detail(self, incident_id: int) -> dict:
+        """One incident in full: what was seen, what was proposed, what was written.
+
+        The summary views answer "what happened". This answers "on what
+        evidence", which is the question anyone reviewing an automated change
+        actually has.
+        """
+        rows = self._query("SELECT * FROM incidents WHERE id = ?", (incident_id,))
+        if not rows:
+            return {}
+        r = rows[0]
+
+        findings = []
+        for f in self._query(
+            "SELECT rule, severity, summary, evidence FROM findings"
+            " WHERE incident_id = ? ORDER BY id", (incident_id,)
+        ):
+            try:
+                evidence = json.loads(f["evidence"] or "{}")
+            except json.JSONDecodeError:  # pragma: no cover - written by us
+                evidence = {}
+            findings.append({
+                "rule": f["rule"], "severity": f["severity"],
+                "summary": f["summary"], "evidence": evidence,
+            })
+
+        actions = []
+        for a in self._query(
+            "SELECT kind, container, before_state, after_state, impacted_pods,"
+            " written, detail, skipped_reason FROM actions"
+            " WHERE incident_id = ? ORDER BY id", (incident_id,)
+        ):
+            actions.append({
+                "kind": a["kind"], "container": a["container"],
+                "before": _loads(a["before_state"]), "after": _loads(a["after_state"]),
+                "impacted_pods": int(a["impacted_pods"]),
+                "written": bool(a["written"]),
+                "detail": a["detail"], "skipped_reason": a["skipped_reason"],
+            })
+
+        row = self._row(r)
+        return {
+            "id": row.id, "created_at": row.created_at, "target": row.target,
+            "state": row.state, "rule": row.rule, "summary": row.summary,
+            "allowed": row.allowed, "autonomy": row.autonomy,
+            "refusals": [c for c in (r["refusals"] or "").split("; ") if c],
+            "commit": row.commit_sha, "branch": r["branch"], "pr_url": r["pr_url"],
+            "verification": row.verification, "verify_detail": r["verify_detail"],
+            "reverted": row.reverted_sha,
+            "findings": findings, "actions": actions,
+        }
+
+    def namespaces(self) -> list[str]:
+        return [r["namespace"] for r in self._query(
+            "SELECT DISTINCT namespace FROM incidents ORDER BY namespace"
+        )]
 
     def stats(self) -> Stats:
         rows = self._query(

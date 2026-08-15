@@ -304,6 +304,39 @@ def show_log(args) -> int:
     return 0
 
 
+def serve_log(args) -> int:
+    """Serve the console. Read-only, and localhost unless told otherwise."""
+    from .serve import serve
+
+    # Opened once to fail fast on an unreadable path; the server opens its own
+    # per request, since its threads cannot share this one.
+    journal = Journal(args.journal)
+    available, error, path = journal.available, journal.error, journal.path
+    journal.close()
+    if not available:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    url = f"http://{args.host}:{args.port}"
+    print(f"\n  kubemend console   {url}")
+    print(f"  reading            {path}")
+    if args.host not in ("127.0.0.1", "localhost"):
+        # Worth saying out loud: this file is an inventory of what breaks.
+        print(f"  \033[33mserving on {args.host}; the log names your workloads\033[0m")
+    print("  read-only; ctrl-c to stop\n")
+
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        serve(path, args.host, args.port)
+    except OSError as exc:
+        print(f"error: cannot bind {args.host}:{args.port} ({exc})", file=sys.stderr)
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kubemend",
@@ -377,6 +410,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("policy", help="print the shipped policies")
 
+    srv = sub.add_parser("serve", help="browse the incident log in a browser")
+    srv.add_argument("--journal", default=str(DEFAULT_PATH))
+    srv.add_argument("--port", type=int, default=8420)
+    srv.add_argument(
+        "--host", default="127.0.0.1",
+        help="the log names what is fragile in your cluster; bind elsewhere deliberately",
+    )
+    srv.add_argument("--open", action="store_true", help="open a browser window")
+
     log = sub.add_parser("log", help="read the incident log")
     log.add_argument("--journal", default=str(DEFAULT_PATH))
     log.add_argument("-n", "--namespace", default="", help="limit to one namespace")
@@ -416,6 +458,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "log":
         return show_log(args)
+
+    if args.command == "serve":
+        return serve_log(args)
 
     if args.snapshot:
         with open(args.snapshot, encoding="utf-8") as fh:

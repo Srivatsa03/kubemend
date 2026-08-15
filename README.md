@@ -216,6 +216,28 @@ Refusals are recorded too. Knowing what the agent *declined* to touch, and why, 
 
 Storage is a SQLite file at `~/.kubemend/journal.db` — stdlib `sqlite3`, so the zero-dependency promise holds. Writes are append-only, and the log is never load-bearing: an unwritable journal degrades to a note in the output rather than failing the run, because losing the audit trail is not a reason to abandon a broken workload. Pass `--journal none` to turn it off, or `--journal <path>` to keep it elsewhere.
 
+## The console
+
+`kubemend log` answers a question you already knew to ask. The console is for the other mode — scanning a week of automated changes to production and stopping at the one that looks wrong.
+
+```bash
+kubemend serve            # http://127.0.0.1:8420
+```
+
+![The kubemend console](docs/console.jpg)
+
+*Real output from `demo/run.sh`: two incidents on the same workload, one fix that held and one that did not.*
+
+Every incident opens to the whole audit trail: the evidence it saw, the action it selected with **both** `before` and `after`, the commit, whether verification confirmed recovery, and the revert if it did not.
+
+Three constraints shaped it, and they are worth stating because each one was a choice:
+
+**It is read-only, structurally rather than by policy.** There are no write routes at all. The only write surface in this project is a git commit, and a dashboard with a "remediate now" button would quietly make that claim untrue.
+
+**It binds to localhost.** The journal is an inventory of what is fragile in your cluster — workloads, images, namespaces, failure modes. `--host` exists for people who mean it, and says so on startup.
+
+**It is stdlib only.** `http.server` over the same SQLite file. Installing a web framework to look at a local database would be a poor reason to break the dependency promise.
+
 ## The design
 
 ### Typed actions, not commands
