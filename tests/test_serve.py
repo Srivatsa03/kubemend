@@ -156,3 +156,13 @@ def test_an_empty_journal_serves_an_empty_page(tmp_path):
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=5)
+
+
+def test_a_workload_name_alone_still_finds_its_history(console):
+    """A name typed without picking a namespace means "in any", not "in none".
+
+    Filtering to nothing here would render as "this workload has no history",
+    which is a different and wrong answer.
+    """
+    _, rows = get(console, "/api/incidents?workload=report-worker")
+    assert [r["target"] for r in rows] == ["jobs/deployment/report-worker"]

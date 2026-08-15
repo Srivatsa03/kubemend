@@ -111,3 +111,8 @@ def test_repeat_offenders_surface_the_workload_seen_twice(populated, capsys):
     assert "payments/checkout" in offenders
     # Seen once, so it is not a pattern yet.
     assert "jobs/report-worker" not in offenders
+
+
+def test_a_workload_without_a_namespace_is_not_filtered_to_nothing(populated, capsys):
+    run_log(populated, "--workload", "report-worker")
+    assert "jobs/deployment/report-worker" in capsys.readouterr().out

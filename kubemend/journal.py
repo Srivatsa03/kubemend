@@ -315,14 +315,18 @@ class Journal:
         return [self._row(r) for r in self._query(sql, params)]
 
     def history(self, namespace: str, name: str, limit: int = 50) -> list[IncidentRow]:
-        """Everything that has happened to one workload, newest first."""
-        return [
-            self._row(r) for r in self._query(
-                "SELECT * FROM incidents WHERE namespace = ? AND name = ?"
-                " ORDER BY id DESC LIMIT ?",
-                (namespace, name, limit),
-            )
-        ]
+        """Everything that has happened to one workload, newest first.
+
+        An empty namespace means "in any" rather than "in the namespace named
+        empty string". Filtering to nothing and rendering it as an empty log
+        would read as "this workload has no history", which is a different and
+        wrong answer.
+        """
+        sql = ("SELECT * FROM incidents WHERE name = ?"
+               + (" AND namespace = ?" if namespace else "")
+               + " ORDER BY id DESC LIMIT ?")
+        params = (name, namespace, limit) if namespace else (name, limit)
+        return [self._row(r) for r in self._query(sql, params)]
 
     def repeat_offenders(self, limit: int = 10) -> list[tuple[str, int]]:
         """Workloads remediated most often.
