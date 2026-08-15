@@ -36,10 +36,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e "."
-      - uses: AbsaOSS/k3d-action@v2
-        with:
-          cluster-name: kubemend-demo
-          args: --agents 1 --wait
+      # Installed directly rather than through a third-party action: the one
+      # that looked obvious pins a k3d release that has since been withdrawn,
+      # so it 404s on every run and nothing in this repo can fix that.
+      - name: Install k3d
+        run: curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+      - name: Create a cluster
+        run: |
+          k3d version
+          k3d cluster create kubemend-demo --agents 1 --wait
+          kubectl get nodes
       - run: |
           git config --global user.email ci@kubemend
           git config --global user.name ci
