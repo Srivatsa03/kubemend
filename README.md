@@ -175,6 +175,47 @@ kubemend remediate --repo ~/gitops --pr
 
 Plans held at `propose` push their branch and open a PR whose body is the commit message — evidence, reason, blast radius, and what was left alone. A repository with no remote, or a missing `gh`, is reported rather than treated as an error, since that is the normal case for a local checkout.
 
+## The incident log
+
+Every run answers *what is wrong now*. Some questions only a history can answer, and they are the ones that decide whether an agent like this deserves more autonomy:
+
+```bash
+kubemend log                         # everything, newest first
+kubemend log -n payments             # one namespace
+kubemend log -n payments --workload checkout   # one workload, over time
+```
+
+```
+  incident log   /Users/you/.kubemend/journal.db
+
+  2026-08-15 16:29  committed     payments/deployment/checkout
+      container checkout is in CrashLoopBackOff after 8 restarts
+  2026-08-15 16:29  refused       kube-system/deployment/coredns
+      container coredns is in CrashLoopBackOff after 6 restarts
+
+  totals   across 3 run(s)
+
+    incidents   12
+    committed   3
+    refused     3
+    verified    2
+    revert rate 33%  (1 of 3 fixes did not hold)
+
+  keeps coming back   a rollback is not going to fix these
+
+      3x  payments/checkout
+```
+
+Two numbers there are worth more than the rest.
+
+**Revert rate is the agent's own accuracy** — how often its fix failed to hold and it had to withdraw its own commit. It is the only honest input to the question "should this be allowed to `apply` rather than `propose`?", and a tool that quietly declined to measure it would be asking for trust it had not earned.
+
+**Repeat offenders** are the workloads a rollback keeps papering over. Something that crash-loops every week does not have a bad release, it has a bug, and the log is what makes that visible instead of letting three successful rollbacks look like three successes.
+
+Refusals are recorded too. Knowing what the agent *declined* to touch, and why, is as much a part of the audit trail as what it changed.
+
+Storage is a SQLite file at `~/.kubemend/journal.db` — stdlib `sqlite3`, so the zero-dependency promise holds. Writes are append-only, and the log is never load-bearing: an unwritable journal degrades to a note in the output rather than failing the run, because losing the audit trail is not a reason to abandon a broken workload. Pass `--journal none` to turn it off, or `--journal <path>` to keep it elsewhere.
+
 ## The design
 
 ### Typed actions, not commands

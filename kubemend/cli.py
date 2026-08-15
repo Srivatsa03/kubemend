@@ -15,6 +15,7 @@ import subprocess
 import sys
 
 from .gitops import GitError, GitOpsRepo
+from .journal import DEFAULT_PATH, Journal
 from .model import Autonomy, Severity
 from .plan import propose, unaddressed
 from .safety import CONSERVATIVE, STAGING, gate
@@ -125,6 +126,11 @@ def remediate(args) -> int:
     c = _color(use_color)
     DIM, BOLD = "2", "1"
 
+    journal = Journal(args.journal) if args.journal != "none" else None
+    run_id = journal.start_run(
+        args.policy, args.namespace or "", "snapshot" if args.snapshot else "live", args.dry_run
+    ) if journal else 0
+
     print(c(BOLD, f"\n  kubemend remediate") +
           c(DIM, f"   {len(plans)} incident(s), policy '{args.policy}', repo {repo.path.name}\n"))
 
@@ -136,10 +142,14 @@ def remediate(args) -> int:
             print(f"    {c('31;1', '✗')} {c('31;1', 'REFUSED ')} {target}")
             for v in verdict.violations:
                 print(f"        {c(DIM, '· ' + v.message)}")
+            if journal:
+                journal.record(run_id, plan, verdict)
             print()
             continue
 
         autonomy = Autonomy.REPORT if args.dry_run else verdict.autonomy
+        result = None
+        reverted = ""
         try:
             emission = repo.emit(plan, autonomy)
         except GitError as exc:
@@ -198,6 +208,8 @@ def remediate(args) -> int:
                 reverted = repo.revert(emission.commit, result.explain())
                 written -= 1
                 print(f"        {c('33', f'reverted in {reverted[:8]}')}")
+        if journal:
+            journal.record(run_id, plan, verdict, emission, result, reverted)
         print()
 
     orphans = unaddressed(findings, plans)
@@ -207,7 +219,88 @@ def remediate(args) -> int:
             print(f"    {c(DIM, '· ' + t_)}")
         print()
 
+    if journal:
+        journal.finish_run(run_id, len(findings), len(plans), written)
+        if not journal.available:
+            print(c(DIM, f"  (incident log unavailable: {journal.error})"))
+        journal.close()
+
     print(c(DIM, f"  {written} commit(s) written.\n"))
+    return 0
+
+
+STATE_COLOR = {
+    "verified": "32;1", "committed": "36", "reported": "2",
+    "refused": "31;1", "reverted": "33", "indeterminate": "33", "still_failing": "31;1",
+}
+
+
+def show_log(args) -> int:
+    """Read back the incident log.
+
+    Every run answers "what is wrong now". This answers the questions that only
+    a history can: which workload keeps breaking, and how often the agent's own
+    fix failed to hold.
+    """
+    journal = Journal(args.journal)
+    if not journal.available:
+        print(f"error: {journal.error}", file=sys.stderr)
+        return 2
+
+    use_color = sys.stdout.isatty() and not args.no_color and not os.environ.get("NO_COLOR")
+    c = _color(use_color)
+    DIM, BOLD = "2", "1"
+
+    filtered = bool(args.workload or args.namespace)
+    rows = (journal.history(args.namespace, args.workload, args.limit) if args.workload
+            else journal.recent(args.limit, args.namespace))
+
+    scope = ""
+    if args.workload:
+        scope = f"   {args.namespace + '/' if args.namespace else ''}{args.workload}"
+    elif args.namespace:
+        scope = f"   namespace {args.namespace}"
+
+    print(c(BOLD, "\n  incident log") + c(DIM, f"{scope or '   ' + str(journal.path)}\n"))
+    if not rows:
+        print(c(DIM, "  nothing recorded here yet\n"))
+        journal.close()
+        return 0
+
+    for row in rows:
+        tone = STATE_COLOR.get(row.state, "2")
+        when = row.created_at.replace("T", " ").rsplit("+", 1)[0]
+        print(f"  {c(DIM, when)}  {c(tone, f'{row.state:<13}')} {row.target}")
+        if row.summary:
+            print(f"      {c(DIM, row.summary[:96])}")
+
+    # The rows above respect the filter; the totals below never do. Saying so
+    # is cheaper than a scoped aggregate nobody asked for, and a mislabelled
+    # revert rate is exactly the kind of number that gets quoted back at you.
+    stats = journal.stats()
+    across = f"   across {stats.runs} run(s)" + (", all workloads" if filtered else "")
+    print(c(BOLD, "\n  totals") + c(DIM, f"{across}\n"))
+    print(f"    incidents   {stats.incidents}")
+    print(f"    committed   {stats.committed}")
+    print(f"    refused     {stats.refused}")
+    print(f"    verified    {stats.verified}")
+    # The agent's own accuracy, which is what should decide whether it earns
+    # more autonomy.
+    if stats.committed:
+        print(f"    {c(BOLD, 'revert rate')} {stats.revert_rate:.0%}  "
+              f"{c(DIM, f'({stats.reverted} of {stats.committed} fixes did not hold)')}")
+
+    # Pointless when the caller already named the workload they care about.
+    repeats = [] if args.workload else [
+        (w, n) for w, n in journal.repeat_offenders(5) if n > 1
+    ]
+    if repeats:
+        print(c(BOLD, "\n  keeps coming back") +
+              c(DIM, "   a rollback is not going to fix these\n"))
+        for workload, n in repeats:
+            print(f"    {n:>3}x  {workload}")
+    print()
+    journal.close()
     return 0
 
 
@@ -271,6 +364,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--pr", action="store_true",
         help="push proposed branches and open a pull request (needs a remote and gh)",
     )
+    rem.add_argument(
+        "--journal", default=str(DEFAULT_PATH),
+        help=f"incident log to append to (default: {DEFAULT_PATH}); 'none' to disable",
+    )
     rem.add_argument("--no-color", action="store_true")
 
     snap = sub.add_parser("snapshot", help="record cluster state to a file for offline analysis")
@@ -279,6 +376,13 @@ def build_parser() -> argparse.ArgumentParser:
     snap.add_argument("--context")
 
     sub.add_parser("policy", help="print the shipped policies")
+
+    log = sub.add_parser("log", help="read the incident log")
+    log.add_argument("--journal", default=str(DEFAULT_PATH))
+    log.add_argument("-n", "--namespace", default="", help="limit to one namespace")
+    log.add_argument("--workload", default="", help="history for one workload, as name")
+    log.add_argument("--limit", type=int, default=20)
+    log.add_argument("--no-color", action="store_true")
     return parser
 
 
@@ -309,6 +413,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "remediate":
         return remediate(args)
+
+    if args.command == "log":
+        return show_log(args)
 
     if args.snapshot:
         with open(args.snapshot, encoding="utf-8") as fh:

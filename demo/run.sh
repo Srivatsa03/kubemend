@@ -111,7 +111,7 @@ blue "5. kubemend writes the fix, then watches to see whether it worked"
 # not recover. The apply below stands in for the reconciler; in a real cluster
 # Argo or Flux would have picked the commit up on its own.
 ( sleep 12; kubectl apply -f "$REPO/clusters/prod/" >/dev/null 2>&1 ) &
-"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 120 --no-color \
+"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 120 --journal /tmp/live-journal.db --no-color \
   | sed '/^$/d;s/^/  /'
 wait
 
@@ -144,7 +144,7 @@ sleep 22
 kubectl -n payments get pods --no-headers | awk '{print "   " $1 "  " $3}'
 
 ( sleep 12; kubectl apply -f "$REPO/clusters/prod/" >/dev/null 2>&1 ) &
-"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 75 --no-color \
+"$KUBEMEND" remediate -n payments --repo "$REPO" --verify --verify-timeout 75 --journal /tmp/live-journal.db --no-color \
   | sed '/^$/d;s/^/  /'
 wait
 
