@@ -298,15 +298,19 @@ An incident is something that happened to a service, and a responder handles the
 
 ### Abstaining is a feature
 
-In the demo above, **10 of 13 findings produce no action at all.** A missing ConfigMap needs a value the agent has no business inventing. An unschedulable pod is a capacity decision. A container restarting for unclear reasons needs a human to read the logs. Reporting these clearly and stopping is the correct behaviour, and the tests assert it.
+On the shipped fixture, 13 findings become 4 plans and **5 findings produce no action at all.** A missing ConfigMap needs a value the agent has no business inventing. An unschedulable pod is a capacity decision. A container restarting for unclear reasons needs a human to read the logs. Reporting these clearly and stopping is the correct behaviour, and the tests assert it.
 
 ## Status
 
-Detection, planning, the policy gate, GitOps emission, pull requests and post-change verification with auto-revert are implemented and tested (118 tests, no dependencies). CI runs the full loop against a real k3d cluster on every push. The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
+Detection, planning, the policy gate, GitOps emission, pull requests, post-change verification with auto-revert, the incident log and the console are implemented and tested (157 tests, no dependencies). CI runs the full loop against a real k3d cluster on every push. The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
 
 Not yet built:
 - A model layer for correlating findings and writing incident narrative
 - StatefulSets, DaemonSets, Jobs; node-level and networking signals
+
+## Technical report
+
+A full write-up of the design — the trust argument, the policy gate, verification semantics, the incident log, and the live-cluster evaluation — is in [`docs/kubemend-report.tex`](docs/kubemend-report.tex) ([PDF](docs/kubemend-report.pdf), 13 pages). It is a single self-contained LaTeX source that compiles on Overleaf with pdfLaTeX; see [`docs/README.md`](docs/README.md).
 
 ## Detection rules
 
