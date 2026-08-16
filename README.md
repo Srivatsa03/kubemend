@@ -308,9 +308,14 @@ Not yet built:
 - A model layer for correlating findings and writing incident narrative
 - StatefulSets, DaemonSets, Jobs; node-level and networking signals
 
-## Technical report
+## Documentation
 
-A full write-up of the design — the trust argument, the policy gate, verification semantics, the incident log, and the live-cluster evaluation — is in [`docs/kubemend-report.tex`](docs/kubemend-report.tex) ([PDF](docs/kubemend-report.pdf), 13 pages). It is a single self-contained LaTeX source that compiles on Overleaf with pdfLaTeX; see [`docs/README.md`](docs/README.md).
+| Document | What it covers |
+|---|---|
+| [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) | What can go wrong when an automated process changes production, what this design **prevents** versus **discourages**, and the twelve failure modes it was built against |
+| [`docs/EVALUATION.md`](docs/EVALUATION.md) | Every measured number, the method behind it, and what has deliberately **not** been evaluated |
+| [`docs/FINDINGS.md`](docs/FINDINGS.md) | Six engineering findings from building an agent that writes to production — reversibility as architecture, reviewability as a safety property, and why the accuracy number nobody publishes is the one that matters |
+| [`docs/kubemend-report.pdf`](docs/kubemend-report.pdf) | The full write-up as a 13-page paper ([LaTeX source](docs/kubemend-report.tex), compiles on Overleaf) |
 
 ## Detection rules
 
