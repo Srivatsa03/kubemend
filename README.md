@@ -308,6 +308,10 @@ Not yet built:
 - A model layer for correlating findings and writing incident narrative
 - StatefulSets, DaemonSets, Jobs; node-level and networking signals
 
+## The write-up
+
+**[srivatsa03.github.io/kubemend](https://srivatsa03.github.io/kubemend/)** — the argument in one page, with the gate's verdicts explorable and every number exported from this repository at build time.
+
 ## Documentation
 
 | Document | What it covers |

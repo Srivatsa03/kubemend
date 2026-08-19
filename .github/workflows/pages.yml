@@ -1,0 +1,64 @@
+name: site
+
+# Publishes site/ to GitHub Pages. The data the page displays is regenerated
+# from this checkout on every deploy, so the published page can never drift
+# from the code, the fixture, or the committed demo transcript.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "kubemend/**"
+      - "fixtures/**"
+      - "demo/transcript.txt"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Regenerate the page data from this checkout
+        run: |
+          pip install -q -e ".[dev]"
+          python site/export.py
+
+      - name: Fail if the committed data is stale
+        run: |
+          # The export is committed so the site can be served from a plain
+          # checkout. If it disagrees with what the code produces right now,
+          # someone changed behaviour without re-exporting, and the page would
+          # have shipped a number the code no longer supports.
+          git diff --exit-code --stat site/data.json || {
+            echo "::error::site/data.json is stale. Run: python site/export.py"
+            exit 1
+          }
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

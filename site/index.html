@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kubemend — an agent that can undo itself</title>
+<meta name="description" content="A Kubernetes remediation agent whose only write surface is a git commit. It verifies its own fix, reverts when the fix does not hold, and records how often that happens.">
+<meta property="og:title" content="kubemend — an agent that can undo itself">
+<meta property="og:description" content="A Kubernetes remediation agent whose only write surface is a git commit.">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⎈</text></svg>">
+<style>
+  :root {
+    --ink:#16181d; --body:#2b2f36; --dim:#6a7078; --faint:#9aa0a8;
+    --line:#e5e5e2; --bg:#fbfbfa; --panel:#fff; --wash:#f5f5f3;
+    --ok:#15803d; --bad:#c0392b; --warn:#a16207; --link:#1d4ed8;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --measure:34rem;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--body);
+    font:1.0625rem/1.68 var(--serif);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+
+  /* ---------- chrome ---------- */
+  .bar{
+    position:sticky;top:0;z-index:20;background:rgba(251,251,250,.88);
+    backdrop-filter:saturate(180%) blur(12px);border-bottom:1px solid var(--line);
+  }
+  .bar .in{
+    max-width:74rem;margin:0 auto;padding:.7rem 1.5rem;
+    display:flex;align-items:center;gap:1.4rem;
+  }
+  .mark{font:600 .875rem/1 var(--mono);color:var(--ink);letter-spacing:-.02em}
+  .bar nav{margin-left:auto;display:flex;align-items:center;gap:1.4rem}
+  .bar a{font:.8125rem/1 var(--sans);color:var(--dim);text-decoration:none}
+  .bar a:hover{color:var(--ink)}
+  .bar code{font:.75rem/1 var(--mono);color:var(--faint);white-space:nowrap}
+  @media (max-width:620px){.bar code{display:none}}
+
+  main{max-width:74rem;margin:0 auto;padding:0 1.5rem}
+  .col{max-width:var(--measure);margin:0 auto}
+  p{margin:0 0 1.15rem}
+  a{color:var(--link)}
+
+  /* ---------- hero ---------- */
+  header{padding:4.5rem 0 0}
+  .kicker{
+    font:600 .8125rem/1 var(--sans);color:var(--bad);letter-spacing:.01em;
+    display:flex;align-items:center;gap:.5rem;margin-bottom:1.4rem;
+  }
+  .kicker::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--bad)}
+  h1{
+    font:700 clamp(2.1rem,5.2vw,3.1rem)/1.08 var(--sans);color:var(--ink);
+    letter-spacing:-.032em;margin:0 0 1.1rem;
+  }
+  .deck{font:italic 1.25rem/1.5 var(--serif);color:var(--dim);margin:0 0 2.4rem}
+  .meta{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    gap:1.4rem 1.4rem;padding-bottom:2rem;border-bottom:1px solid var(--line);
+  }
+  .meta dt{font:600 .6875rem/1 var(--sans);color:var(--faint);
+    letter-spacing:.09em;text-transform:uppercase;margin-bottom:.42rem}
+  .meta dd{margin:0;font:.875rem/1.4 var(--sans);color:var(--ink)}
+  @media (max-width:700px){.meta{grid-template-columns:repeat(2,1fr)}}
+  header .col{padding-bottom:2.6rem}
+
+  /* ---------- body ---------- */
+  section{padding:.25rem 0}
+  h2{
+    font:700 1.375rem/1.3 var(--sans);color:var(--ink);letter-spacing:-.02em;
+    margin:2.8rem 0 1rem;
+  }
+  h3{font:600 1.0625rem/1.4 var(--sans);color:var(--ink);margin:2rem 0 .7rem}
+  .lede{font-size:1.15rem;color:var(--ink)}
+  strong{color:var(--ink);font-weight:600}
+  code{font:.875em/1.4 var(--mono);background:var(--wash);
+    padding:.1em .34em;border-radius:3px;color:var(--ink)}
+  .note{font:.875rem/1.6 var(--sans);color:var(--dim)}
+
+  /* ---------- figures ---------- */
+  figure{margin:2.2rem auto;max-width:44rem}
+  figure.wide{max-width:52rem;margin-left:auto;margin-right:auto}
+  figcaption{
+    font:.8125rem/1.55 var(--sans);color:var(--dim);
+    margin-top:.85rem;max-width:var(--measure);
+  }
+  figcaption b{color:var(--ink);font-weight:600}
+  .frame{background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .frame-h{
+    padding:.6rem .95rem;border-bottom:1px solid var(--line);background:var(--wash);
+    font:.75rem/1 var(--mono);color:var(--dim);display:flex;justify-content:space-between;gap:1rem;
+  }
+  pre{
+    margin:0;padding:1rem 1.1rem;overflow-x:auto;
+    font:.8125rem/1.65 var(--mono);color:var(--ink);
+  }
+  .diff .del{color:var(--bad)}
+  .diff .add{color:var(--ok)}
+  .diff .del,.diff .add{display:block}
+
+  /* ---------- gate explorer ---------- */
+  .switch{display:flex;gap:.4rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap}
+  .switch span{font:.75rem/1 var(--sans);color:var(--faint);
+    letter-spacing:.08em;text-transform:uppercase;font-weight:600;margin-right:.3rem}
+  .switch button{
+    font:500 .8125rem/1 var(--sans);padding:.44rem .8rem;cursor:pointer;
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--dim);
+  }
+  .switch button[aria-pressed=true]{
+    background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600;
+  }
+  .tw{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font:.875rem/1.5 var(--sans)}
+  @media (max-width:640px){table{min-width:34rem}}
+  th{
+    text-align:left;font:600 .6875rem/1 var(--sans);color:var(--faint);
+    letter-spacing:.08em;text-transform:uppercase;padding:.85rem .95rem;
+    border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  td{padding:.85rem .95rem;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  .wl{font:.8125rem/1.4 var(--mono);color:var(--ink)}
+  .sub{font:.75rem/1.45 var(--sans);color:var(--faint);margin-top:.2rem}
+  .pill{
+    display:inline-block;font:600 .6875rem/1 var(--sans);padding:.32rem .55rem;
+    border-radius:20px;border:1px solid currentColor;letter-spacing:.02em;white-space:nowrap;
+  }
+  .p-apply{color:var(--ok)} .p-propose{color:var(--warn)} .p-report{color:var(--bad)}
+  .why{font:.75rem/1.45 var(--mono);color:var(--faint);margin-top:.3rem}
+  .changed{animation:flash .5s ease}
+  @keyframes flash{from{background:#fef9c3}to{background:transparent}}
+
+  /* ---------- timeline ---------- */
+  .runs{display:grid;gap:1rem;grid-template-columns:1fr 1fr}
+  @media (max-width:640px){.runs{grid-template-columns:1fr}}
+  .run{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:1.1rem 1.2rem}
+  .run.kept{border-left:3px solid var(--ok)}
+  .run.undone{border-left:3px solid var(--warn)}
+  .run h4{margin:0 0 .15rem;font:600 .9375rem/1.35 var(--sans);color:var(--ink)}
+  .run .setup{font:.8125rem/1.5 var(--sans);color:var(--dim);margin:0 0 .9rem}
+  .big{font:700 1.75rem/1 var(--sans);letter-spacing:-.03em;color:var(--ink)}
+  .big small{font:600 .8125rem/1 var(--sans);color:var(--faint);letter-spacing:0;margin-left:.3rem}
+  .verdict{font:.8125rem/1.5 var(--mono);margin-top:.7rem;padding-top:.7rem;border-top:1px solid var(--line)}
+  .run.kept .verdict{color:var(--ok)} .run.undone .verdict{color:var(--warn)}
+
+  /* ---------- stat row ---------- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .stat{background:var(--panel);padding:1.05rem 1.1rem}
+  .stat .n{font:700 1.6rem/1 var(--sans);letter-spacing:-.03em;color:var(--ink)}
+  .stat .k{font:600 .6875rem/1 var(--sans);color:var(--faint);
+    letter-spacing:.08em;text-transform:uppercase;margin-top:.4rem}
+  .stat .h{font:.75rem/1.45 var(--sans);color:var(--dim);margin-top:.45rem}
+
+  /* ---------- callout ---------- */
+  .callout{
+    border-left:3px solid var(--ink);padding:.15rem 0 .15rem 1.15rem;margin:1.8rem 0;
+    font:.9375rem/1.65 var(--sans);color:var(--body);
+  }
+  .callout strong{color:var(--ink)}
+
+  /* ---------- refusal list ---------- */
+  .ns{display:flex;flex-wrap:wrap;gap:.4rem;margin:1rem 0 0}
+  .ns code{font-size:.75rem;background:var(--panel);border:1px solid var(--line)}
+
+  /* ---------- footer ---------- */
+  footer{
+    margin-top:5rem;border-top:1px solid var(--line);padding:2.2rem 0 4rem;
+    font:.8125rem/1.85 var(--mono);color:var(--faint);
+  }
+  footer a{color:var(--dim)}
+  footer .col{max-width:52rem}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="in">
+    <span class="mark">kubemend</span>
+    <nav>
+      <a href="#gate">the gate</a>
+      <a href="#live">live run</a>
+      <a href="https://github.com/Srivatsa03/kubemend/blob/main/docs/THREAT-MODEL.md">threat model</a>
+      <a href="https://github.com/Srivatsa03/kubemend">code</a>
+      <code>demo/run.sh</code>
+    </nav>
+  </div>
+</div>
+
+<main>
+
+<header>
+  <div class="col">
+    <div class="kicker">Systems design · autonomous remediation</div>
+    <h1>An agent that cannot undo itself should not be allowed to act.</h1>
+    <p class="deck">So this one's only write is a git commit — and after it commits, it watches, withdraws the fix that did not hold, and keeps score.</p>
+    <dl class="meta">
+      <div><dt>Author</dt><dd>Srivatsa Kamballa</dd></div>
+      <div><dt>Published</dt><dd>August 2026</dd></div>
+      <div><dt>Evidence</dt><dd id="m-evidence">—</dd></div>
+      <div><dt>Implementation</dt><dd id="m-impl">—</dd></div>
+    </dl>
+  </div>
+</header>
+
+<section>
+  <div class="col">
+    <p class="lede">Every observability tool can tell you a pod is in <code>CrashLoopBackOff</code>. Almost none of them are trusted to do anything about it, and the reason is not model quality. Granting write access to production requires an answer to one question — what stops this doing something catastrophic at 3am — and <em>the model is usually careful</em> is not an answer. It is a claim about average behaviour offered in reply to a question about the worst case.</p>
+
+    <p>The obstacle is structural. An agent that emits shell commands or free-form manifests has an unbounded action space, and three properties then become unavailable <em>in principle</em>: you cannot enumerate what it might do, you cannot compute the blast radius before it runs, and there is no mechanical inverse, so recovery is itself a judgement call under pressure.</p>
+
+    <p>kubemend inverts the constraint. It diagnoses freely and acts narrowly, and the narrowness is enforced by code with tests rather than by instructions in a prompt. It holds no cluster credentials and issues no write to the Kubernetes API. Its only write surface is a commit to the GitOps repository that already defines the cluster; the reconciler you already run carries it the rest of the way.</p>
+
+    <div class="callout">
+      <strong>Undoing the agent is <code>git revert</code>.</strong> Not a feature anyone had to build, correct for twenty years, and already known by every operator on the team at 3am.
+    </div>
+  </div>
+
+  <figure class="wide">
+    <div class="frame">
+      <div class="frame-h"><span>the commit it wrote</span><span id="f1-sha">—</span></div>
+      <pre id="f1-msg">loading…</pre>
+    </div>
+    <figcaption><b>Figure 1.</b> One incident, end to end. The commit carries the evidence that produced it, the blast radius, and the instruction that matters. Nothing here was written by a human, and the manifest edit underneath it is a single line.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="col">
+    <h2>A correct change can be an unreviewable change</h2>
+    <p>If review is your safety mechanism, diff size is a safety property — and the obvious implementation destroys it. Parse the YAML, mutate the object, serialise it back, and you get a correct file and a useless commit: comments dropped, keys reordered, quoting normalised. A reviewer expecting to check one number is shown three hundred changed lines.</p>
+    <p>What happens next is the actual failure. Nobody reads three hundred lines of reformatted YAML at 3am. They skim it, see it is machine-generated, and approve. <strong>The review step still exists in the diagram and has stopped being a control.</strong></p>
+    <p>So kubemend rejects the YAML library and edits the text surgically, against an indentation-path tracker. Trailing comments survive, including the exact spacing before them.</p>
+  </div>
+
+  <figure>
+    <div class="frame">
+      <div class="frame-h"><span>clusters/prod/checkout.yaml</span><span>1 file changed</span></div>
+      <pre class="diff" id="f2-diff">loading…</pre>
+    </div>
+    <figcaption><b>Figure 2.</b> The entire change. The comment keeps its column, because a diff where the comment shifts is a diff a reviewer has to read twice — and every extra token of reading is a chance the review stops being real.</figcaption>
+  </figure>
+</section>
+
+<section id="gate">
+  <div class="col">
+    <h2>What it refuses</h2>
+    <p>Before anything is written, the plan goes through a gate: a pure function from plan and policy to a verdict, with no model in the loop. It bounds blast radius, requires a computable undo, rate-limits itself, and excludes the control plane outright.</p>
+    <p>Below are the four plans kubemend produces from a recorded cluster shipped in the repository. Switch the policy and watch where the verdicts move — and where they do not.</p>
+  </div>
+
+  <figure class="wide">
+    <div class="switch">
+      <span>policy</span>
+      <button data-policy="conservative" aria-pressed="true">conservative</button>
+      <button data-policy="staging" aria-pressed="false">staging</button>
+    </div>
+    <div class="frame">
+      <div class="tw"><table>
+        <thead><tr>
+          <th style="width:36%">Workload</th><th style="width:20%">Action</th>
+          <th style="width:16%">Verdict</th><th>Why</th>
+        </tr></thead>
+        <tbody id="gate-rows"><tr><td colspan="4">loading…</td></tr></tbody>
+      </table></div>
+    </div>
+    <figcaption><b>Figure 3.</b> Verdicts computed by the real gate and exported at build time, so this table cannot drift from the code. Loosening policy changes the <em>destination</em> of a plan, not permission: <code>payments/api</code> is promoted from review to unattended, while <code>kube-system/coredns</code> stays refused under both — the identical <code>rollback</code> that is applied elsewhere.</figcaption>
+  </figure>
+
+  <div class="col">
+    <p>That refusal is a hard one. Control-plane namespaces are excluded rather than guarded by a threshold, because touching them can remove the machinery you would use to recover.</p>
+    <div class="ns" id="ns-list"></div>
+    <p class="note" style="margin-top:1rem">An unconfigured <code>Policy()</code> permits nothing. A permissive default is the difference between a bounded assistant and an unsupervised process with cluster credentials.</p>
+
+    <h3>Abstaining is the common case</h3>
+    <p id="abstain">—</p>
+    <p>Those are not gaps. A missing ConfigMap needs a value the agent has no business inventing; an unschedulable pod is a capacity decision; a container restarting for unclear reasons needs a human to read the logs. An agent that acted on all thirteen would be worse, not more capable — so abstention is a designed output, and the test suite asserts it rather than merely tolerating it.</p>
+  </div>
+</section>
+
+<section id="live">
+  <div class="col">
+    <h2>Then it checks its own work</h2>
+    <p>A loop that stops at <em>committed</em> is half a loop. The agent acted on a diagnosis that may have been wrong, and until something checks, the cluster is in a state nobody has confirmed is better than the one it replaced.</p>
+    <p>So it polls. Recovery means the motivating findings are gone <em>and</em> no new critical finding appeared, confirmed by <strong>two consecutive clean reads</strong>, because a rollout looks briefly healthy as it begins. A poll that cannot reach the cluster proves nothing — so it does not count toward recovery, and it breaks the streak rather than being skipped. Two clean reads either side of a blind one are not two consecutive observations.</p>
+    <p>On positive evidence that the fix did not hold, it withdraws its own commit.</p>
+  </div>
+
+  <figure class="wide">
+    <div class="runs" id="runs"></div>
+    <figcaption><b>Figure 4.</b> Both outcomes, from one run of <code>demo/run.sh</code> against a live k3d cluster. The second scenario ships two bad releases in a row, so rolling back one still leaves the workload broken — the case where the agent's plan is reasonable and still wrong. Timings are wall-clock from commit to verdict and vary between runs; the outcomes do not.</figcaption>
+  </figure>
+
+  <div class="col">
+    <div class="callout">
+      <strong>Reverting on no evidence would be worse than not reverting.</strong> An unreachable API server is not a failed fix. Undoing on that basis turns a network blip into a second unplanned production change, so an unverifiable outcome stops and asks for a human. Silence is not success — but it is not failure either.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2>The number nobody publishes</h2>
+    <p>Detection rates get published constantly, and nobody is stuck on whether a crash loop can be identified. The question actually gating autonomy is different: <strong>how often is it wrong when it acts?</strong></p>
+    <p>Because kubemend verifies, that number exists. Every run — findings, plan, verdict, commit, verification, revert — is written to an append-only log, and the log reports the agent's revert rate: how often its own fix failed to hold and it had to withdraw its own commit.</p>
+  </div>
+
+  <figure class="wide">
+    <div class="stats" id="stats"></div>
+    <figcaption><b>Figure 5.</b> From the same live run. <b>The 50% is a property of the demo, not an accuracy claim</b> — one of its two scenarios is deliberately unfixable by rollback. It shows the measurement working end to end: a failed fix detected, withdrawn, and counted. A production revert rate has not been measured, and quoting this one as such would be quoting a demo parameter.</figcaption>
+  </figure>
+
+  <div class="col">
+    <p>The repeat-offender line is the same idea over time. A workload remediated every week does not have a bad release, it has a bug — and without a history, three successful rollbacks look like three successes rather than one unaddressed defect.</p>
+    <p>A revert rate is what should earn an agent the promotion from <em>propose</em> to <em>apply</em>: measured on that workload, in that cluster, by that agent. A tool that declines to measure it is asking for trust it has not earned.</p>
+
+    <h2>Try it</h2>
+    <p>The analysis path runs with no cluster and nothing installed, against a recorded snapshot of a cluster having a bad afternoon.</p>
+  </div>
+
+  <figure>
+    <div class="frame">
+      <div class="frame-h"><span>terminal</span><span>no dependencies</span></div>
+<pre>git clone https://github.com/Srivatsa03/kubemend
+cd kubemend &amp;&amp; pip install -e ".[dev]"
+
+kubemend diagnose --snapshot fixtures/broken-cluster.json
+kubemend policy                    <span style="color:#9aa0a8"># what each policy permits</span>
+
+demo/run.sh                        <span style="color:#9aa0a8"># the full loop, real k3d cluster</span>
+kubemend log                       <span style="color:#9aa0a8"># what it knows about itself</span>
+kubemend serve                     <span style="color:#9aa0a8"># the console, on localhost</span></pre>
+    </div>
+    <figcaption>The live demo needs <code>k3d</code>, <code>kubectl</code> and a Docker daemon. CI runs that same script against a real cluster on every push, because a project claiming it works against a real cluster should not prove it with mocks.</figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>What has not been established</h3>
+    <p class="note">No production deployment — every result here is from a fixture or a throwaway cluster. The planner is <strong>deterministic</strong>; there is no model in the decision path, which is sequencing rather than limitation, so that when one is added it correlates and explains rather than deciding what happens to your cluster. Verification is single-workload: it confirms the treated workload recovered, not that the change was harmless to its dependents. Coverage is Deployments only. Version 0.1.0, alpha.</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="col">
+    <span id="foot-ver">kubemend</span> · Apache-2.0 · © 2026 Srivatsa Kamballa ·
+    <a href="https://github.com/Srivatsa03/kubemend">github.com/Srivatsa03/kubemend</a><br>
+    Full argument in
+    <a href="https://github.com/Srivatsa03/kubemend/blob/main/docs/THREAT-MODEL.md">docs/THREAT-MODEL.md</a>,
+    <a href="https://github.com/Srivatsa03/kubemend/blob/main/docs/EVALUATION.md">docs/EVALUATION.md</a>,
+    <a href="https://github.com/Srivatsa03/kubemend/blob/main/docs/FINDINGS.md">docs/FINDINGS.md</a>
+  </div>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+fetch("data.json").then(r => r.json()).then(render).catch(err => {
+  $("#gate-rows").innerHTML =
+    '<tr><td colspan="4">Could not load data.json — ' + esc(err.message) + "</td></tr>";
+});
+
+let DATA = null;
+
+function render(d) {
+  DATA = d;
+  const a = d.analysis, dm = d.demo, pr = d.project;
+
+  // --- hero metadata -------------------------------------------------------
+  $("#m-evidence").textContent =
+    `${a.findings} findings · live k3d run`;
+  $("#m-impl").textContent =
+    `${pr.loc.toLocaleString()} lines · ${pr.tests} tests · 0 deps`;
+  $("#foot-ver").textContent = `kubemend v0.1.0 · ${pr.tests} tests`;
+
+  // --- figure 1: the commit ------------------------------------------------
+  $("#f1-sha").textContent = dm.kept_commit || "";
+  $("#f1-msg").textContent = dm.commit_message || "";
+
+  // --- figure 2: the diff --------------------------------------------------
+  $("#f2-diff").innerHTML =
+    `<span class="del">-          ${esc(dm.diff_removed)}</span>` +
+    `<span class="add">+          ${esc(dm.diff_added)}</span>`;
+
+  // --- protected namespaces ------------------------------------------------
+  $("#ns-list").innerHTML =
+    pr.protected_namespaces.map(n => `<code>${esc(n)}</code>`).join("");
+
+  // --- abstention ----------------------------------------------------------
+  $("#abstain").innerHTML =
+    `On that recorded cluster, <strong>${a.findings} findings become ` +
+    `${a.plans} plans</strong>, and <strong>${a.findings_no_action} findings ` +
+    `produce no action at all</strong>. Of the ${a.plans} plans, one is refused outright.`;
+
+  // --- figure 4: the two runs ----------------------------------------------
+  $("#runs").innerHTML = `
+    <div class="run kept">
+      <h4>A fix that worked</h4>
+      <p class="setup">One bad release — an image tag typo.</p>
+      <div class="big">${dm.recovered_seconds}<small>s to verdict</small></div>
+      <div class="verdict">recovered · commit kept</div>
+    </div>
+    <div class="run undone">
+      <h4>A fix that did not</h4>
+      <p class="setup">Two bad releases in a row, so rolling back one is not enough.</p>
+      <div class="big">${dm.failed_seconds}<small>s to verdict</small></div>
+      <div class="verdict">still_failing · reverted in ${esc(dm.reverted_commit)}</div>
+    </div>`;
+
+  // --- figure 5: the numbers -----------------------------------------------
+  const ro = dm.repeat_offender;
+  $("#stats").innerHTML = [
+    stat(dm.reverted_of[1], "committed", "fixes written to git"),
+    stat(dm.reverted_of[1] - dm.reverted_of[0], "verified", "confirmed recovered"),
+    stat(dm.reverted_of[0], "reverted", "withdrew its own commit"),
+    stat(dm.revert_rate + "%", "revert rate",
+         `${dm.reverted_of[0]} of ${dm.reverted_of[1]} did not hold`),
+    ro ? stat(ro.count + "×", "repeat offender", esc(ro.workload)) : "",
+  ].join("");
+
+  drawGate("conservative");
+}
+
+function stat(n, k, h) {
+  return `<div class="stat"><div class="n">${n}</div>` +
+         `<div class="k">${k}</div><div class="h">${h}</div></div>`;
+}
+
+let SHOWN = null;   // the policy currently rendered, so we can diff against it
+
+function drawGate(policy) {
+  const prev = SHOWN;
+  const moved = new Set();
+  if (prev && prev !== policy) {
+    DATA.analysis.rows.forEach((r, i) => {
+      const a = r.verdicts[prev], b = r.verdicts[policy];
+      if (a.allowed !== b.allowed || a.autonomy !== b.autonomy) moved.add(i);
+    });
+  }
+
+  const rows = DATA.analysis.rows.map((r, i) => {
+    const v = r.verdicts[policy];
+    const level = v.allowed ? v.autonomy : "report";
+    const label = v.allowed ? v.autonomy : "refused";
+    // A refusal explains itself; a permitted plan says what it would disturb.
+    const why = v.reasons.length
+      ? v.reasons[0]
+      : `${r.pods} pod(s) · within every limit`;
+    return `<tr${moved.has(i) ? ' class="changed"' : ""}>
+      <td><div class="wl">${esc(r.workload)}</div>
+          <div class="sub">${esc(r.why[0])}</div></td>
+      <td><code>${esc(r.action)}</code></td>
+      <td><span class="pill p-${level}">${esc(label)}</span></td>
+      <td><div class="sub">${esc(why)}</div>
+          ${v.codes.length ? `<div class="why">${esc(v.codes.join(", "))}</div>` : ""}</td>
+    </tr>`;
+  }).join("");
+
+  // Only the rows whose verdict actually moved are flagged. Highlighting all
+  // four would bury the row that did not move, which is the point of the
+  // figure: kube-system stays refused no matter how far policy is loosened.
+  $("#gate-rows").innerHTML = rows;
+  SHOWN = policy;
+}
+
+document.querySelectorAll(".switch button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".switch button")
+      .forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    drawGate(b.dataset.policy);
+  };
+});
+</script>
+</body>
+</html>

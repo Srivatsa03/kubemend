@@ -1,0 +1,318 @@
+{
+ "analysis": {
+  "findings": 13,
+  "plans": 4,
+  "findings_in_plans": 8,
+  "findings_no_action": 5,
+  "by_rule": [
+   {
+    "rule": "replica_shortfall",
+    "count": 4,
+    "blurb": "Fewer replicas available than desired"
+   },
+   {
+    "rule": "crashloop",
+    "count": 3,
+    "blurb": "Container the kubelet has given up restarting promptly"
+   },
+   {
+    "rule": "config_error",
+    "count": 1,
+    "blurb": "References a ConfigMap or Secret that does not exist"
+   },
+   {
+    "rule": "flapping",
+    "count": 1,
+    "blurb": "Restarting repeatedly while still reporting healthy"
+   },
+   {
+    "rule": "image_pull",
+    "count": 1,
+    "blurb": "Bad tag, bad registry, or missing pull credentials"
+   },
+   {
+    "rule": "oomkilled",
+    "count": 1,
+    "blurb": "Killed by the kernel for exceeding its memory limit"
+   },
+   {
+    "rule": "rollout_stuck",
+    "count": 1,
+    "blurb": "Rollout past its progress deadline"
+   },
+   {
+    "rule": "unschedulable",
+    "count": 1,
+    "blurb": "No node can fit the pod"
+   }
+  ],
+  "rows": [
+   {
+    "workload": "jobs/report-worker",
+    "namespace": "jobs",
+    "action": "rollback",
+    "before": {
+     "revision": 4
+    },
+    "after": {
+     "revision": 3
+    },
+    "pods": 2,
+    "why": [
+     "cannot pull image reg.internal/report-worker:v3.1.7 for report-worker-6b8c9d2e1f-qq7ws",
+     "report-worker has 0/2 replicas available"
+    ],
+    "rules": [
+     "image_pull",
+     "replica_shortfall"
+    ],
+    "verdicts": {
+     "conservative": {
+      "allowed": true,
+      "autonomy": "apply",
+      "codes": [],
+      "reasons": []
+     },
+     "staging": {
+      "allowed": true,
+      "autonomy": "apply",
+      "codes": [],
+      "reasons": []
+     }
+    }
+   },
+   {
+    "workload": "kube-system/coredns",
+    "namespace": "kube-system",
+    "action": "rollback",
+    "before": {
+     "revision": 5
+    },
+    "after": {
+     "revision": 4
+    },
+    "pods": 2,
+    "why": [
+     "container coredns in coredns-76f75df574-abcde is in CrashLoopBackOff after 6 restarts",
+     "coredns has 1/2 replicas available"
+    ],
+    "rules": [
+     "crashloop",
+     "replica_shortfall"
+    ],
+    "verdicts": {
+     "conservative": {
+      "allowed": false,
+      "autonomy": "report",
+      "codes": [
+       "protected_namespace"
+      ],
+      "reasons": [
+       "kube-system is protected"
+      ]
+     },
+     "staging": {
+      "allowed": false,
+      "autonomy": "report",
+      "codes": [
+       "protected_namespace"
+      ],
+      "reasons": [
+       "kube-system is protected"
+      ]
+     }
+    }
+   },
+   {
+    "workload": "payments/api",
+    "namespace": "payments",
+    "action": "set_resources",
+    "before": {
+     "memory": "256Mi"
+    },
+    "after": {
+     "memory": "512Mi"
+    },
+    "pods": 4,
+    "why": [
+     "container api in api-5c6d7f8a9b-mn4zx was OOMKilled"
+    ],
+    "rules": [
+     "oomkilled"
+    ],
+    "verdicts": {
+     "conservative": {
+      "allowed": true,
+      "autonomy": "propose",
+      "codes": [
+       "autonomy_ceiling"
+      ],
+      "reasons": [
+       "held at 'propose' by action(s): set_resources"
+      ]
+     },
+     "staging": {
+      "allowed": true,
+      "autonomy": "apply",
+      "codes": [],
+      "reasons": []
+     }
+    }
+   },
+   {
+    "workload": "payments/checkout",
+    "namespace": "payments",
+    "action": "rollback",
+    "before": {
+     "revision": 12
+    },
+    "after": {
+     "revision": 11
+    },
+    "pods": 3,
+    "why": [
+     "container checkout in checkout-7d9f4c8b6-x2klm is in CrashLoopBackOff after 8 restarts",
+     "container checkout in checkout-7d9f4c8b6-p8trq is in CrashLoopBackOff after 7 restarts",
+     "rollout of checkout exceeded its progress deadline"
+    ],
+    "rules": [
+     "crashloop",
+     "rollout_stuck"
+    ],
+    "verdicts": {
+     "conservative": {
+      "allowed": true,
+      "autonomy": "apply",
+      "codes": [],
+      "reasons": []
+     },
+     "staging": {
+      "allowed": true,
+      "autonomy": "apply",
+      "codes": [],
+      "reasons": []
+     }
+    }
+   }
+  ]
+ },
+ "policies": {
+  "conservative": {
+   "max_impacted_pods": 5,
+   "max_workloads": 1,
+   "max_namespaces": 1,
+   "max_plans_per_window": 3,
+   "default_autonomy": "report",
+   "autonomy": {
+    "restart": "propose",
+    "rollback": "apply",
+    "scale": "propose",
+    "set_resources": "propose"
+   },
+   "allowed": [
+    "restart",
+    "rollback",
+    "scale",
+    "set_resources"
+   ]
+  },
+  "staging": {
+   "max_impacted_pods": 25,
+   "max_workloads": 5,
+   "max_namespaces": 2,
+   "max_plans_per_window": 10,
+   "default_autonomy": "propose",
+   "autonomy": {
+    "restart": "apply",
+    "rollback": "apply",
+    "scale": "apply",
+    "set_image": "apply",
+    "set_probe": "apply",
+    "set_resources": "apply"
+   },
+   "allowed": [
+    "restart",
+    "rollback",
+    "scale",
+    "set_image",
+    "set_probe",
+    "set_resources"
+   ]
+  }
+ },
+ "demo": {
+  "recovered_seconds": 26,
+  "failed_seconds": 76,
+  "failed_reason": "cannot pull image nginx:1.27-broken-a for checkout-78f8f7548c-kvxr7",
+  "kept_commit": "9465b30a",
+  "diff_removed": "image: nginx:1.27-alpine-typo   # known good",
+  "diff_added": "image: nginx:1.27-alpine   # known good",
+  "reverted_commit": "0b0d81f4",
+  "revert_rate": 50,
+  "reverted_of": [
+   1,
+   2
+  ],
+  "repeat_offender": {
+   "workload": "payments/checkout",
+   "count": 2
+  },
+  "commit_message": "rollback payments/deployment/checkout\n\nObserved:\n  [critical] cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-449mb\n\nChanged:\n  restored clusters/prod/checkout.yaml to e0f51568\n    reason: image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-449mb\n\nBlast radius: 2 pod(s) across 1 workload(s).\nUndo: git revert this commit."
+ },
+ "project": {
+  "tests": 157,
+  "loc": 3248,
+  "actions": [
+   {
+    "kind": "scale",
+    "effect": "Change replica count",
+    "field": "spec.replicas"
+   },
+   {
+    "kind": "rollback",
+    "effect": "Revert a workload to a prior revision",
+    "field": "restored from git history"
+   },
+   {
+    "kind": "restart",
+    "effect": "Trigger a rolling restart",
+    "field": "no manifest field \u2014 refused"
+   },
+   {
+    "kind": "set_resources",
+    "effect": "Adjust requests or limits",
+    "field": "\u2026containers.c.resources"
+   },
+   {
+    "kind": "set_image",
+    "effect": "Pin or correct a container image",
+    "field": "\u2026containers.c.image"
+   },
+   {
+    "kind": "set_probe",
+    "effect": "Adjust probe timings or thresholds",
+    "field": "no manifest field \u2014 refused"
+   }
+  ],
+  "autonomy_levels": [
+   "report",
+   "propose",
+   "apply"
+  ],
+  "protected_namespaces": [
+   "argocd",
+   "cert-manager",
+   "flux-system",
+   "ingress-nginx",
+   "istio-system",
+   "kube-node-lease",
+   "kube-public",
+   "kube-system",
+   "linkerd",
+   "monitoring",
+   "observability",
+   "velero"
+  ],
+  "repo": "https://github.com/Srivatsa03/kubemend"
+ }
+}
