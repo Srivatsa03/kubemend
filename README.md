@@ -7,6 +7,8 @@
 
 **A Kubernetes SRE agent whose only write surface is a git commit.**
 
+![kubemend committing a fix, watching it work, and reverting the one that did not](docs/media/demo.gif)
+
 Every AI SRE tool will read your cluster and tell you what it thinks is wrong. Almost none of them are trusted to *act*, and the reason is not model quality. It is that nobody has a convincing answer to "what stops it doing something catastrophic at 3am," and "the model is usually careful" is not an answer.
 
 kubemend is an attempt at the answer. It diagnoses freely and acts narrowly, and every constraint on it is code with tests rather than a prompt.
