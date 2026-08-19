@@ -151,7 +151,7 @@ def remediate(args) -> int:
         result = None
         reverted = ""
         try:
-            emission = repo.emit(plan, autonomy)
+            emission = repo.emit(plan, autonomy, push=not args.no_push)
         except GitError as exc:
             print(f"    {c('31;1', '✗')} {c('31;1', 'ERROR   ')} {target}\n        {exc}\n",
                   file=sys.stderr)
@@ -167,6 +167,12 @@ def remediate(args) -> int:
         if emission.committed:
             written += 1
             print(f"        {c(DIM, f'commit {emission.commit[:8]} on {emission.branch}')}")
+            if emission.pushed:
+                print(f"        {c(DIM, 'pushed to origin/' + emission.branch)}")
+            elif emission.push_note:
+                # Loud, because an undelivered commit is not a fix. Whatever is
+                # reconciling the cluster is still looking at the old state.
+                print(f"        {c('33', emission.push_note)}")
             if args.pr and autonomy is Autonomy.PROPOSE:
                 url = repo.open_pull_request(emission)
                 print(f"        {c(DIM, url or emission.pr_note)}")
@@ -182,9 +188,14 @@ def remediate(args) -> int:
                     print("        " + c("31;1", line))
 
         # Verification only means anything for a change that actually reached
-        # the mainline. A branch awaiting review has not been applied to
-        # anything yet, so there is nothing to watch.
-        if args.verify and emission.committed and autonomy is Autonomy.APPLY:
+        # the mainline *and* the remote. A branch awaiting review has not been
+        # applied to anything yet, and a commit that failed to push has not
+        # either — watching one would time out against a cluster that was never
+        # sent the fix, and then revert a change that might have worked.
+        if (args.verify and autonomy is Autonomy.APPLY
+                and emission.committed and not emission.delivered):
+            print(f"        {c('33', 'not verifying: the change was never delivered')}")
+        elif args.verify and emission.delivered and autonomy is Autonomy.APPLY:
             print(f"        {c(DIM, 'watching for recovery...')}")
             def read_cluster():
                 # collect() exits the process on a kubectl failure, which is
@@ -205,7 +216,8 @@ def remediate(args) -> int:
             tone2 = "32;1" if result.healthy else "31;1"
             print(f"        {c(tone2, result.explain())}")
             if result.outcome.should_revert:
-                reverted = repo.revert(emission.commit, result.explain())
+                reverted = repo.revert(emission.commit, result.explain(),
+                                       push=not args.no_push)
                 written -= 1
                 print(f"        {c('33', f'reverted in {reverted[:8]}')}")
         if journal:
@@ -396,6 +408,10 @@ def build_parser() -> argparse.ArgumentParser:
     rem.add_argument(
         "--pr", action="store_true",
         help="push proposed branches and open a pull request (needs a remote and gh)",
+    )
+    rem.add_argument(
+        "--no-push", action="store_true",
+        help="commit without pushing; the reconciler will not see the change",
     )
     rem.add_argument(
         "--journal", default=str(DEFAULT_PATH),

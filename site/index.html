@@ -342,7 +342,7 @@ kubemend serve                     <span style="color:#9aa0a8"># the console, on
 
   <div class="col">
     <h3>What has not been established</h3>
-    <p class="note">No production deployment — every result here is from a fixture or a throwaway cluster. The planner is <strong>deterministic</strong>; there is no model in the decision path, which is sequencing rather than limitation, so that when one is added it correlates and explains rather than deciding what happens to your cluster. Verification is single-workload: it confirms the treated workload recovered, not that the change was harmless to its dependents. Coverage is Deployments only. Version 0.1.0, alpha.</p>
+    <p class="note">No production deployment — the cluster is local, there is no traffic, and the incidents are injected rather than organic. The headline demo substitutes <code>kubectl apply</code> for a reconciler; <code>deploy/</code> runs real Argo CD against a real GitHub repository instead, and doing that is what exposed a bug where an applied fix was committed but never pushed. The planner is <strong>deterministic</strong>; there is no model in the decision path, which is sequencing rather than limitation, so that when one is added it correlates and explains rather than deciding what happens to your cluster. Verification is single-workload: it confirms the treated workload recovered, not that the change was harmless to its dependents. Coverage is Deployments only. Version 0.1.0, alpha.</p>
   </div>
 </section>
 

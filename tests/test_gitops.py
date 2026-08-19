@@ -395,3 +395,114 @@ def test_nothing_to_propose_when_no_branch_commit_was_made(repo):
     emission = r.emit(plan_of(scale()), Autonomy.APPLY)   # lands on main
     assert r.open_pull_request(emission) == ""
     assert "nothing to propose" in emission.pr_note
+
+
+# --- delivery -----------------------------------------------------------------
+#
+# A commit that never reaches the remote is not a change to the cluster. This
+# gap was found by running against real Argo CD: with `kubectl apply` standing
+# in for a reconciler, the local commit was enough, so nothing ever exercised
+# the push.
+
+
+def origin_for(repo: Path, tmp_path: Path) -> Path:
+    # Beside the working tree, not inside it: a bare repo under `repo` would
+    # show up as an untracked file and emission refuses a dirty tree.
+    bare = tmp_path.parent / f"{tmp_path.name}-origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    git(repo, "remote", "add", "origin", str(bare))
+    return bare
+
+
+def head_of(bare: Path, branch: str = "main") -> str:
+    """The tip of a branch in the bare remote.
+
+    Read the branch by name rather than HEAD: a bare repo's HEAD still points at
+    whatever `git init` defaulted to, which is not necessarily the branch we
+    pushed.
+    """
+    return subprocess.run(["git", "rev-parse", f"refs/heads/{branch}"], cwd=str(bare),
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_apply_pushes_to_the_remote(repo, tmp_path):
+    bare = origin_for(repo, tmp_path)
+
+    emission = GitOpsRepo(repo).emit(plan_of(scale()), Autonomy.APPLY)
+
+    assert emission.committed
+    assert emission.pushed, emission.push_note
+    assert emission.delivered
+    assert head_of(bare) == emission.commit
+
+
+def test_no_remote_is_not_a_failed_delivery(repo):
+    """A local repository is the source of truth for whatever reads it."""
+    emission = GitOpsRepo(repo).emit(plan_of(scale()), Autonomy.APPLY)
+
+    assert emission.committed
+    assert not emission.pushed
+    assert not emission.push_failed
+    assert emission.delivered            # the local demo depends on this
+    assert "no git remote" in emission.push_note
+
+
+def test_a_rejected_push_is_reported_as_undelivered(repo, tmp_path):
+    # A remote that cannot be pushed to: the path is not a repository.
+    git(repo, "remote", "add", "origin", str(tmp_path / "not-a-repo"))
+
+    emission = GitOpsRepo(repo).emit(plan_of(scale()), Autonomy.APPLY)
+
+    assert emission.committed            # the commit is real
+    assert emission.push_failed
+    assert not emission.delivered        # but nothing else can see it
+    assert "push failed" in emission.push_note
+
+
+def test_push_can_be_declined(repo, tmp_path):
+    origin_for(repo, tmp_path)
+
+    emission = GitOpsRepo(repo).emit(plan_of(scale()), Autonomy.APPLY, push=False)
+
+    assert emission.committed
+    assert not emission.pushed
+    assert not emission.push_failed      # declining is not failing
+    assert emission.delivered
+
+
+def test_a_revert_is_pushed_too(repo, tmp_path):
+    """A revert nobody can see leaves the broken change live."""
+    bare = origin_for(repo, tmp_path)
+    gitops = GitOpsRepo(repo)
+
+    emission = gitops.emit(plan_of(scale()), Autonomy.APPLY)
+    head = gitops.revert(emission.commit, "still failing after 76s")
+
+    assert head_of(bare) == head
+
+
+def test_a_proposed_branch_is_not_pushed_by_emit(repo, tmp_path):
+    """Pushing a review branch is open_pull_request's job, not emit's."""
+    origin_for(repo, tmp_path)
+
+    emission = GitOpsRepo(repo).emit(plan_of(scale()), Autonomy.PROPOSE)
+
+    assert emission.committed
+    assert not emission.pushed
+
+
+def test_the_revert_sha_is_a_commit_that_exists(repo):
+    """`commit --amend` replaces the object, so a SHA read before it dangles.
+
+    This value is what the journal stores and what the CLI prints as
+    "reverted in ...", so a stale one sends a reviewer to a commit that is not
+    in the history.
+    """
+    gitops = GitOpsRepo(repo)
+    emission = gitops.emit(plan_of(scale()), Autonomy.APPLY)
+
+    head = gitops.revert(emission.commit, "still failing after 76s")
+
+    assert head == git(repo, "rev-parse", "HEAD").strip()
+    # cat-file exits non-zero for an object that is not reachable as a commit.
+    assert git(repo, "cat-file", "-t", head).strip() == "commit"

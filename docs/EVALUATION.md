@@ -14,7 +14,7 @@ Two things are worth saying before any of them. First, **the interesting measure
 | Live fix that worked | `recovered` after **26s**, commit kept | [below](#live-a-real-k3d-cluster) |
 | Live fix that did not | `still_failing` after **76s**, commit reverted | [below](#live-a-real-k3d-cluster) |
 | Measured revert rate | **50%** (1 of 2) | [below](#the-number-that-matters) |
-| Test suite | 157 tests, 0 runtime dependencies | [below](#test-surface) |
+| Test suite | 164 tests, 0 runtime dependencies | [below](#test-surface) |
 
 ## Offline: the recorded fixture
 
@@ -167,22 +167,22 @@ The repeat-offender line is the same story from the other side: `payments/checko
 ## Test surface
 
 ```bash
-pytest -q          # 157 passed
+pytest -q          # 164 passed
 ```
 
-| Module | LOC | Tests |
-|---|---|---|
-| `signals.py` | 382 | 23 |
-| `plan.py` | 184 | 25 |
-| `safety.py` | 278 | 28 |
-| `gitops.py` | 430 | 33 |
-| `manifest.py` | 204 | (covered via gitops) |
-| `verify.py` | 171 | 9 |
-| `journal.py` | 435 | 16 |
-| `serve.py` | 397 | 15 |
-| `cli.py` | 536 | 8 |
-| `model.py` | 224 | — |
-| **Total** | **3,248** | **157** |
+| Module | LOC | Test file | Tests |
+|---|---|---|---|
+| `signals.py` | 382 | `test_signals.py` | 23 |
+| `plan.py` | 184 | `test_plan.py` | 25 |
+| `safety.py` | 278 | `test_safety.py` | 28 |
+| `gitops.py` | 515 | `test_gitops.py` | 40 |
+| `manifest.py` | 204 | (covered via gitops) | — |
+| `verify.py` | 171 | `test_verify.py` | 9 |
+| `journal.py` | 439 | `test_journal.py` | 16 |
+| `serve.py` | 397 | `test_serve.py` | 15 |
+| `cli.py` | 552 | `test_cli_log.py` | 8 |
+| `model.py` | 224 | — | — |
+| **Total** | **3,349** | | **164** |
 
 Three testing decisions are load-bearing, and each was chosen because the cheaper alternative would have passed against broken code:
 
@@ -203,7 +203,8 @@ CI runs the suite on Python 3.10 and 3.13, plus a separate job that installs k3d
 
 Stated plainly, because the gaps are more informative than the numbers:
 
-- **No production deployment.** Every result here is from a fixture or a throwaway cluster.
+- **No production deployment.** Every result here is from a fixture or a throwaway cluster, and the incidents are injected rather than organic.
+- **The reconciler in the demo is a stand-in.** `demo/run.sh` uses `kubectl apply` where Argo CD or Flux would be. `deploy/` stands up real Argo CD against a real GitHub repository instead; running it is what exposed the delivery bug described in [`FINDINGS.md`](FINDINGS.md), and its results are not yet recorded here.
 - **No accuracy measurement on real incidents.** There is no labelled corpus of "what a human would have done", so precision and recall of the *planner* are unmeasured. The revert rate is a proxy for it, and only for the cases where the agent acted.
 - **No false-negative measurement.** Nothing measures the problems detection misses.
 - **No load or scale testing.** Behaviour on a cluster with thousands of workloads is unknown.

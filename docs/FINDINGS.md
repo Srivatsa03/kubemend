@@ -1,6 +1,6 @@
 # An agent is trustworthy in proportion to what it cannot do
 
-Six findings from building a remediation agent that is allowed to change production.
+Seven findings from building a remediation agent that is allowed to change production.
 
 **A note on what kind of document this is.** These are *engineering* findings, not empirical results. They came out of building the system and watching it fail in specific ways, and the evidence for each is a design consequence or a real bug, not a controlled experiment. Where a number appears it is reproducible ([`EVALUATION.md`](EVALUATION.md)); where a judgement appears it is labelled as one. The distinction matters because the temptation in this space is to dress design opinions as measurements, and that is precisely the habit that makes agent tooling hard to evaluate.
 
@@ -14,8 +14,9 @@ Six findings from building a remediation agent that is allowed to change product
 | 4 | Failing safe and failing silently are the same mechanism seen from two sides. |
 | 5 | Abstention is the majority behaviour, so it has to be a designed output rather than a fallthrough. |
 | 6 | The measurement that decides trust is the one nobody publishes. |
+| 7 | A stand-in for a dependency hides the bugs that only the real one causes. |
 
-The thread running through all six: **a safety property that holds because the code cannot express the alternative survives contact with production. A property that holds because the system is usually careful does not.** Most of the work below is moving properties from the second category into the first.
+The thread running through all seven: **a safety property that holds because the code cannot express the alternative survives contact with production. A property that holds because the system is usually careful does not.** Most of the work below is moving properties from the second category into the first.
 
 ---
 
@@ -176,6 +177,52 @@ kubemend records every run — findings, plan, verdict, commit, verification out
 
 ---
 
+## Finding 7: a stand-in hides the bugs only the real thing causes
+
+**Claim.** Substituting a simpler thing for a dependency does not just leave a
+gap in coverage. It actively conceals defects, because the substitute quietly
+satisfies a requirement the real dependency would have enforced.
+
+`demo/run.sh` used `kubectl apply` where Argo CD or Flux would be. That seemed
+like an honest simplification — the demo said so in a comment, and the agent's
+contract ends at the commit either way.
+
+It was not. Standing up real Argo CD against a real GitHub repository exposed
+this immediately:
+
+> **`apply` committed locally and never pushed.**
+
+With `kubectl apply` reading the working tree, a local commit *was* the
+delivery, so the code was correct for the substitute and wrong for everything
+it stood in for. Against a reconciler watching a remote, the commit is
+invisible. And the failure compounds in the worst available direction: the
+workload never recovers, verification reports `still_failing`, and the agent
+**reverts a fix that was correct but undelivered** — concluding its diagnosis
+was wrong when the only thing wrong was delivery.
+
+Thirty-three tests covered `gitops.py`. None caught it, because none had a
+remote. The substitute had defined the interface they were written against.
+
+Two further defects surfaced in the same session, both from finally exercising
+a remote:
+
+- **Every reported revert SHA was dangling.** `revert()` read `HEAD` before
+  `commit --amend`, and amending replaces the commit object. The value the
+  journal stored and the CLI printed as `reverted in ...` pointed at a commit
+  not in the history.
+- **The suite went from 13s to 346s** the moment pushes appeared, because git
+  was sitting at credential prompts until each 30-second timeout. That is a
+  test-suite annoyance and a production defect wearing the same clothes: an
+  unattended agent must never be the process waiting at a password prompt.
+  `_git` now runs with no terminal prompt, no askpass, non-interactive SSH, and
+  no inherited stdin.
+
+**What it implies.** When a stand-in sits where a dependency will, ask what the
+real one enforces that the substitute does not. Here it was one word —
+*delivery* — and the substitute answered it for free. The generalisation is
+uncomfortable: the more convenient the stand-in, the more requirements it is
+silently satisfying on your behalf.
+
 ## What this means if you are building one
 
 1. **Decide where the write lands before anything else.** It determines which safety properties are available at all, and no amount of model quality recovers a property the architecture forecloses.
@@ -184,6 +231,7 @@ kubemend records every run — findings, plan, verdict, commit, verification out
 4. **Separate "no evidence" from "evidence of failure"** and give them different consequences. Collapsing them produces either false confidence or gratuitous churn.
 5. **Assume every fail-safe component can hide its own bugs,** and give something outside it visibility.
 6. **Publish the accuracy number**, including when it is unflattering. It is the one that decides whether the thing gets to act.
+7. **Run it against the real dependency early.** A stand-in does not merely fail to test things; it satisfies requirements on your behalf and hides the defects that violate them.
 
 ## Limits of these findings
 

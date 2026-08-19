@@ -136,6 +136,38 @@ A plan's autonomy is the **minimum across its actions**, so one action requiring
 
 The measurement half matters as much: the incident log reports the agent's **revert rate** — how often its own fix failed to hold. That is the honest input to "should this be allowed to apply rather than propose?", and a tool that declined to measure it would be asking for trust it had not earned.
 
+### 13. A change that is committed but never delivered
+
+**Failure.** The agent commits a fix, the commit never reaches the remote the
+reconciler watches, and the cluster is never sent the change. Verification then
+observes a workload that was never going to recover, reports `still_failing`,
+and the agent **reverts a fix that was correct** — concluding its diagnosis was
+wrong when the only thing wrong was delivery.
+
+**Response — prevented, after being found the hard way.** This was a real defect,
+invisible for as long as the demo used `kubectl apply` in place of a reconciler,
+because reading the working tree made a local commit indistinguishable from a
+delivered one. An `apply` now pushes when a remote exists, and a revert pushes
+too, since a revert nobody can see leaves the broken change live.
+
+The distinction that matters is between *no remote* and *a failed push*. A
+repository with no remote is the source of truth for whatever reads it, which is
+the normal local case. A failed push means the commit exists on one machine
+while the reconciler still reads the old state — so it is reported loudly, and
+verification is skipped rather than allowed to draw a conclusion about a change
+the cluster never received.
+
+### 14. Blocking on a credential prompt
+
+**Failure.** Any operation touching a remote can ask for a password. An agent
+running unattended that sits at a prompt has stopped doing the job, and has done
+so invisibly.
+
+**Response — prevented.** Every git invocation runs with no terminal prompt, no
+askpass, non-interactive SSH, and no inherited stdin, so a credential request
+becomes a fast reportable failure instead of a hang. Timeouts are surfaced as
+delivery failures rather than crashes.
+
 ## What the gate enforces
 
 Six properties, checked by a pure function with no model in the loop:
@@ -155,7 +187,7 @@ Policy is **data, not code**, so the rules governing an autonomous system are th
 
 These are real and should be read before trusting the design further than it deserves.
 
-- **The reconciler is assumed correct and assumed present.** kubemend's contract ends at the commit. If nothing reconciles, nothing happens; if the reconciler misapplies, that is outside the model.
+- **The reconciler is assumed correct.** kubemend's contract ends at delivering the commit; if the reconciler misapplies it, that is outside the model. *Delivery itself* is no longer assumed — see failure 13.
 - **Verification is single-workload.** It confirms the treated workload recovered. It does not confirm the change was harmless to dependents, and a fix that repairs one service while breaking its downstream reads as `recovered`.
 - **No authentication on the console.** It is read-only and binds to localhost, and that is the entire access control story. Exposing it with `--host` puts an inventory of what is fragile in your cluster on the network.
 - **The journal is not tamper-evident.** It is a local SQLite file with no signing or append-only enforcement below the application layer.

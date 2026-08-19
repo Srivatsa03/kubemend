@@ -302,7 +302,7 @@ On the shipped fixture, 13 findings become 4 plans and **5 findings produce no a
 
 ## Status
 
-Detection, planning, the policy gate, GitOps emission, pull requests, post-change verification with auto-revert, the incident log and the console are implemented and tested (157 tests, no dependencies). CI runs the full loop against a real k3d cluster on every push. The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
+Detection, planning, the policy gate, GitOps emission, pull requests, post-change verification with auto-revert, the incident log and the console are implemented and tested (164 tests, no dependencies). CI runs the full loop against a real k3d cluster on every push. The planner is **deterministic today** — there is no model in it yet, and that is sequencing rather than limitation: the parts that must be trustworthy are code with tests, so when a model is added it correlates and explains rather than deciding what happens to your cluster.
 
 Not yet built:
 - A model layer for correlating findings and writing incident narrative
@@ -311,6 +311,10 @@ Not yet built:
 ## The write-up
 
 **[srivatsa03.github.io/kubemend](https://srivatsa03.github.io/kubemend/)** — the argument in one page, with the gate's verdicts explorable and every number exported from this repository at build time.
+
+## A real deployment
+
+[`deploy/`](deploy/) stands up **actual Argo CD** against a **real GitHub GitOps repository** ([kubemend-gitops-demo](https://github.com/Srivatsa03/kubemend-gitops-demo)), rather than substituting `kubectl apply` the way the demo does. Running it found a bug the substitute had hidden: `apply` committed without pushing, so the reconciler never saw the fix and the agent would revert a change that was correct but undelivered. See [`docs/FINDINGS.md`](docs/FINDINGS.md#finding-7-a-stand-in-hides-the-bugs-only-the-real-thing-causes).
 
 ## Documentation
 

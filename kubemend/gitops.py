@@ -26,6 +26,7 @@ already produces for findings it cannot safely fix.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,10 +47,40 @@ class GitError(RuntimeError):
     """A git command failed, or the repository is not in a usable state."""
 
 
-def _git(repo: Path, *args: str, check: bool = True) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=30
-    )
+def _first_line(text: str) -> str:
+    """Git failures are multi-line and mostly hint text; keep the actionable bit."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("hint:"):
+            return line[:160]
+    return text.strip()[:160]
+
+
+# Anything that touches a remote can ask for a credential, and an agent that
+# runs unattended must never be the process sitting at a password prompt. These
+# turn every such request into a fast, reportable failure instead of a hang:
+# no terminal prompt, no GUI askpass, no interactive SSH, and no inherited stdin
+# for git to read from.
+_NON_INTERACTIVE = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_ASKPASS": "",
+    "SSH_ASKPASS": "",
+    "GIT_SSH_COMMAND": "ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new",
+}
+
+
+def _git(repo: Path, *args: str, check: bool = True, timeout: float = 30) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            env={**os.environ, **_NON_INTERACTIVE},
+        )
+    except subprocess.TimeoutExpired:
+        # Reported rather than raised as a crash: a stalled remote is a delivery
+        # failure like any other, and the caller decides what that means.
+        raise GitError(f"git {' '.join(args)}: timed out after {timeout:.0f}s") from None
     if check and result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.strip() or result.stdout.strip()}")
     return result.stdout
@@ -98,8 +129,25 @@ class Emission:
     commit: str = ""
     message: str = ""
     committed: bool = False
+    pushed: bool = False
+    push_failed: bool = False
+    push_note: str = ""
     pr_url: str = ""
     pr_note: str = ""
+
+    @property
+    def delivered(self) -> bool:
+        """Whether a reconciler could actually see this change.
+
+        "No remote" and "the push failed" are different facts and must not be
+        collapsed. A repository with no remote *is* the source of truth for
+        whatever reads it, which is the normal local case; a failed push means
+        the commit exists only here while the reconciler still reads the old
+        state. Only the second one makes verification meaningless — watching a
+        cluster that was never sent the fix would time out and then revert a
+        change that might have worked.
+        """
+        return self.committed and not self.push_failed
 
     @property
     def applied(self) -> list[Change]:
@@ -256,12 +304,21 @@ class GitOpsRepo:
         *,
         branch: str | None = None,
         author: str = "kubemend <kubemend@localhost>",
+        push: bool = True,
     ) -> Emission:
         """Render a plan and, unless reporting only, commit it.
 
         ``autonomy`` decides the destination, not whether the work happens:
         REPORT renders the diff and reverts the working tree, PROPOSE commits to
         a new branch for review, APPLY commits to the current branch.
+
+        An APPLY commit is pushed when a remote exists, because the contract of
+        this agent is that a reconciler picks the commit up. A commit sitting
+        unpushed on one machine is not a change to the cluster at all, and the
+        failure mode is worse than doing nothing: verification would watch a
+        workload that was never going to recover and revert a fix that was
+        correct but undelivered. ``push=False`` is for callers that manage
+        delivery themselves.
         """
         if self.dirty():
             raise GitError(
@@ -301,6 +358,8 @@ class GitOpsRepo:
                  "commit", "-m", emission.message)
             emission.commit = _git(self.path, "rev-parse", "HEAD").strip()
             emission.committed = True
+            if autonomy is Autonomy.APPLY and push:
+                self._deliver(emission)
             if autonomy is Autonomy.PROPOSE:
                 _git(self.path, "checkout", original)
         except Exception:
@@ -355,7 +414,7 @@ class GitOpsRepo:
 
     # --- undoing and proposing --------------------------------------------
 
-    def revert(self, commit: str, reason: str) -> str:
+    def revert(self, commit: str, reason: str, *, push: bool = True) -> str:
         """Undo one of our own commits with a new commit.
 
         ``git revert`` rather than a reset: the history of an automated system
@@ -364,13 +423,21 @@ class GitOpsRepo:
         """
         _git(self.path, "-c", "user.name=kubemend", "-c", "user.email=kubemend@localhost",
              "revert", "--no-edit", commit)
-        head = _git(self.path, "rev-parse", "HEAD").strip()
         _git(self.path, "-c", "user.name=kubemend", "-c", "user.email=kubemend@localhost",
              "commit", "--amend", "--no-edit", "-m",
              f"Revert \"{self._subject(commit)}\"\n\n"
              f"Verification did not confirm recovery: {reason}\n\n"
              f"This reverts {commit[:8]}. The cluster is back to the state a human\n"
              f"last approved, which is where an unverified automated change belongs.\n")
+        # Read HEAD *after* the amend. Amending replaces the commit object, so a
+        # SHA captured before it is left dangling — and this value is what the
+        # journal stores and the CLI prints as "reverted in ...".
+        head = _git(self.path, "rev-parse", "HEAD").strip()
+        # A revert nobody can see leaves the broken change live wherever the
+        # reconciler is looking, which is the one outcome worse than not
+        # reverting at all.
+        if push and self.has_remote():
+            _git(self.path, "push", "origin", self.current_branch(), check=False)
         return head
 
     def _subject(self, commit: str) -> str:
@@ -378,6 +445,24 @@ class GitOpsRepo:
 
     def has_remote(self) -> bool:
         return bool(_git(self.path, "remote", check=False).strip())
+
+    def _deliver(self, emission: Emission) -> None:
+        """Push the commit so the reconciler can see it.
+
+        A local repository with no remote is the normal case for a demo, and is
+        recorded rather than treated as an error. A push that *fails* is the
+        opposite: the change was not delivered, and saying so is what stops
+        verification drawing a conclusion about a change the cluster never got.
+        """
+        if not self.has_remote():
+            emission.push_note = "no git remote; commit is local only"
+            return
+        try:
+            _git(self.path, "push", "origin", emission.branch)
+            emission.pushed = True
+        except GitError as exc:
+            emission.push_failed = True
+            emission.push_note = f"push failed: {_first_line(str(exc))}"
 
     def open_pull_request(self, emission: Emission, base: str | None = None) -> str:
         """Push the branch and open a pull request, if that is possible here.
