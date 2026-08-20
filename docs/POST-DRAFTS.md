@@ -1,121 +1,265 @@
-# Post drafts — kubemend
+# kubemend: LinkedIn + Medium
 
-Attach `docs/media/demo.gif` to any of these. All numbers are real and checkable
-in the repo.
+Attach `docs/media/demo.gif` to the LinkedIn post. Every number below is real
+and checkable in the repo.
 
----
+================================================================================
+## LINKEDIN
+================================================================================
 
-## A. LinkedIn — the bug story (recommended)
+I have built a Kubernetes agent that can diagnose a broken deployment, write the
+correct fix, commit it, confirm the workload did not recover, and then revert its
+own change.
 
-I'd been testing my Kubernetes remediation agent with `kubectl apply` standing in
-for Argo CD. Close enough, I figured. The agent's job ends at the commit either way.
+Three of those five steps are features.
 
-Swapped in the real reconciler this week. It found three bugs in about an hour.
+The whole pitch of this thing is that it never touches your cluster. It has no
+credentials. It writes a git commit, and whatever reconciler you already run
+picks it up from there. Undoing it is `git revert`, which is a feature I did not
+have to build and every engineer already knows at 3am.
 
-The worst one: the agent committed its fix and never pushed it. With `kubectl apply`
-reading my working tree, a local commit *was* the delivery — so the code was correct
-for the stand-in and wrong for everything it stood in for.
+While building it I did not feel like installing Argo CD, so I used `kubectl
+apply` as a stand-in. Close enough, I decided. The agent's job ends at the commit
+either way.
 
-Against a real reconciler watching a remote, that commit is invisible. The workload
-never recovers. Verification correctly reports "still failing." And then the agent
-does the reasonable thing with the wrong information: it reverts its own fix.
+Last week I installed the real thing.
 
-A fix that was correct. Undone, because it was never delivered.
+It found three bugs. The best one: my agent was committing the fix and never
+pushing it. With `kubectl apply` reading my working tree, a local commit was the
+delivery. The code was correct for the fake reconciler and wrong for every real
+one.
 
-33 tests covered that code path. None of them had a remote, so none of them could
-have caught it. The stand-in hadn't just failed to test delivery — it had been
-quietly satisfying the requirement on my behalf.
+Against Argo CD, that commit does not exist. The workload never recovers.
+Verification correctly reports "still failing." And then the agent does the
+reasonable thing with the wrong information, and reverts its own fix.
 
-The lesson I'm keeping: a stand-in doesn't only leave a gap in coverage. It answers
-a question the real dependency would have asked, and hides every defect that
-depends on the answer.
+A fix that was correct. Undone, because nobody ever received it.
 
-The other two, for completeness: every revert SHA the agent reported was dangling
-(read HEAD before `commit --amend`, which replaces the commit object), and git was
-sitting at credential prompts until each 30s timeout — which is a slow test suite
-and a production hang wearing the same clothes. An unattended agent must never be
-the process waiting at a password prompt.
+I had 33 tests on that code path. Not one of them had a git remote, so not one of
+them could have caught it.
 
-kubemend is a Kubernetes SRE agent whose only write surface is a git commit. It has
-no cluster credentials. Undoing it is `git revert`. The GIF is a real run: it fixes
-one incident, fails to fix a second, and withdraws its own commit.
+That is the part I have not stopped thinking about. A stand-in does not just
+leave a gap in your coverage. It answers a question the real dependency would
+have asked, and it hides every bug that depends on the answer.
 
-Code and write-up: github.com/Srivatsa03/kubemend
+Two smaller ones surfaced the same afternoon, both from finally touching a remote:
 
----
+Every revert hash my agent reported pointed at a commit that does not exist. I
+read HEAD before `git commit --amend`, which replaces the commit object. My audit
+trail was citing a hash with total confidence and no referent.
 
-## B. LinkedIn — the measurement angle
+My test suite went from 13 seconds to 346. Git was sitting at a credential prompt
+until each 30 second timeout. That is a slow test suite and a production hang
+wearing the same outfit. An unattended agent should never be the process waiting
+for somebody to type a password.
 
-Every AI SRE demo shows you the fix that worked.
+The tool is called kubemend. It reads your cluster, commits a fix, watches to see
+whether it worked, and withdraws the commit when it did not. It also reports how
+often its own fixes fail to hold, which is a number I have not seen anyone else
+publish.
 
-Mine shows both, because I think the second one is the product.
+I assume that is because publishing it means admitting your agent is sometimes
+wrong.
 
-The agent finds a broken deploy, commits a rollback to the GitOps repo, then
-watches. First incident: recovered in 26 seconds, commit kept. Second incident,
-two bad releases in a row so the rollback lands on another broken revision: still
-failing after 76 seconds, and it reverts its own commit.
+Mine is. It says so in the log.
 
-That gives you a number almost nobody in this space reports — the revert rate. How
-often the agent's own fix failed to hold and it had to withdraw it.
+--------------------------------------------------------------------------------
+First comment (LinkedIn buries posts with external links, so put it here):
 
-It's the only honest input to "should this be allowed to act unattended rather than
-open a PR?" And I suspect it goes unreported because reporting it means saying out
+Code, the threat model, and a live write-up: github.com/Srivatsa03/kubemend
+The clip is a real run against a k3d cluster. It fixes one incident, fails to fix
+the next, and reverts itself. Planner is deterministic, no model in the decision
+path yet.
+--------------------------------------------------------------------------------
+
+
+================================================================================
+## MEDIUM
+================================================================================
+
+# My Agent Undid Its Own Correct Fix. The Bug Was in My Test Setup.
+
+### What happened when I swapped `kubectl apply` for real Argo CD, and why 33 tests never stood a chance
+
+Every observability tool on earth can tell you a pod is in `CrashLoopBackOff`.
+Almost none of them are trusted to do anything about it, and the reason is not
+model quality. Granting write access to production requires an answer to one
+question, which is what stops this doing something catastrophic at 3am, and "the
+model is usually careful" is not an answer. It is a claim about average behavior
+offered in reply to a question about the worst case.
+
+So I built kubemend on the opposite constraint. It has no cluster credentials and
+issues no write to the Kubernetes API. Its only write surface is a commit to the
+GitOps repository that already defines your cluster. Argo CD or Flux carries it
+the rest of the way. Undoing the agent is `git revert`.
+
+That single decision inherits an entire safety apparatus instead of
+reimplementing it. An audit trail exists because git is one. Review before
+rollout exists because a pull request is the native unit of review. Rollback is a
+command every operator already knows.
+
+It also, as it turns out, gave me somewhere excellent to hide a bug.
+
+## The convenient stand-in
+
+Installing Argo CD into a throwaway cluster is a few minutes of work and about
+four gigabytes of RAM. While iterating I did not want either, so my demo script
+used `kubectl apply` where a reconciler would be.
+
+This felt like an honest simplification. I even wrote a comment saying so. The
+agent's contract ends at the commit, the reasoning went, so whatever applies that
+commit is somebody else's concern.
+
+Last week I stood up the real thing: a k3d cluster, actual Argo CD, and a real
+GitOps repository on GitHub for it to reconcile.
+
+It found three bugs.
+
+## The one that matters
+
+My agent was committing its fix and never pushing it.
+
+With `kubectl apply` reading my local working tree, a local commit **was** the
+delivery. The substitute had quietly satisfied a requirement that the real thing
+enforces, so my code was correct for the stand-in and wrong for everything it
+stood in for.
+
+Point a real reconciler at a remote and that commit simply does not exist. Here
+is the sequence:
+
+1. The agent detects a bad image tag and plans a rollback. Correct.
+2. It writes the manifest change and commits. Correct.
+3. The commit never leaves my machine. Nobody notices.
+4. Argo CD, watching GitHub, sees nothing. The cluster keeps running the broken
+   release.
+5. The agent polls, watching for recovery. It never comes.
+6. Verification correctly reports `still_failing`.
+7. The agent reverts its own commit.
+
+Step seven is the one that gets me. Given the evidence available, reverting was
+the *right call*. The fix appeared not to work. The agent has a rule that says an
+unverified change does not stay, and it followed the rule.
+
+It just happened to be reasoning about a change the cluster was never sent. A
+correct fix, thrown away, because delivery silently failed and nothing in the
+system could tell the difference between "this fix did not work" and "this fix
+never arrived."
+
+I now track those separately. `Emission.delivered` distinguishes "no remote,"
+which is fine because a local repository is the source of truth for whatever
+reads it, from "the push failed," which is not fine at all. Only the second one
+skips verification, because watching a cluster that never received your change
+and then drawing conclusions from its behavior is not verification. It is
+astrology with better logging.
+
+## Why the tests were never going to catch it
+
+I had 33 tests on the emission path. They run against a real temporary git
+repository rather than mocks, because the behavior under test is what git
+actually does with history and branches, and I was rather pleased with myself
+about that.
+
+Not one of them had a remote.
+
+Every one of those tests silently encoded the same assumption the demo script
+did, which is that a commit landing in the local repository is the end of the
+story. The stand-in had not merely gone untested. It had defined the interface my
+tests were written against.
+
+This is the generalizable part, and I think it is worth more than the bug:
+
+> A stand-in does not just leave a gap in your coverage. It satisfies a
+> requirement the real dependency would have enforced, and hides every defect
+> that depends on that requirement.
+
+The more convenient the substitute, the more requirements it is quietly meeting
+on your behalf. `kubectl apply` was extremely convenient.
+
+## The two I found on the way out
+
+Once a remote was in play, two more surfaced within the hour.
+
+**Every revert hash was dangling.** `revert()` ran `git revert`, captured HEAD,
+then ran `git commit --amend` to rewrite the message. Amending replaces the
+commit object, so the hash I captured no longer existed. That value is what the
+incident log stores and what the CLI prints as `reverted in ...`, so my audit
+trail was pointing reviewers at a commit that was not in the history. The fix is
+one line and the embarrassment is free.
+
+**My test suite went from 13 seconds to 346.** The moment pushes appeared, git
+started sitting at credential prompts until each 30 second timeout expired. This
+looks like a test suite annoyance and is actually a production defect in
+disguise: an agent that runs unattended must never be the process waiting for
+somebody to type a password. Every git call now runs with no terminal prompt, no
+askpass, non interactive SSH, and no inherited stdin, so a credential request
+becomes a fast reportable failure instead of a hang.
+
+## The number nobody publishes
+
+Since the agent verifies its own work, it can measure something most tooling in
+this space does not report: how often its fix failed to hold and it had to
+withdraw its own commit.
+
+I call it the revert rate. It is the only honest input to the question of whether
+an agent should be allowed to act unattended rather than open a pull request for
+a human. Detection rates get published constantly, and nobody is stuck on whether
+a crash loop can be identified. The blocker is whether the thing gets to act.
+
+My guess is the number goes unpublished because publishing it means saying out
 loud that your agent is sometimes wrong.
 
-Two design decisions I'd defend at length:
-
-Recovery requires two consecutive clean reads, and a failed read *breaks* the
-streak rather than being skipped. Two clean reads either side of a blind one are
-not two consecutive observations.
-
-An unreachable API server is not a failed fix. Reverting on that would turn a
-network blip into a second unplanned production change — so an unverifiable
-outcome stops and asks for a human. Silence is not success, but it isn't failure
+Two design decisions I will defend at length. Recovery requires two consecutive
+clean reads, and a failed read *breaks* the streak rather than being skipped,
+because two clean reads either side of a blind one are not two consecutive
+observations. And an unreachable API server is not a failed fix, so it does not
+trigger a revert. Undoing a change on that basis would turn a network blip into a
+second unplanned production change. Silence is not success, but it is not failure
 either.
 
-Honest caveats, since they belong next to the number: the planner is deterministic,
-there's no model in the decision path yet, and the 50% revert rate in the GIF is a
-property of a demo built so one of two scenarios is unfixable by rollback. It shows
-the measurement works. It is not a production accuracy claim.
+## The honest part
 
-github.com/Srivatsa03/kubemend
+The planner is deterministic. There is no model in the decision path, and I would
+rather say that plainly than let anyone assume otherwise. That is sequencing, not
+modesty: the parts that have to be trustworthy are code with tests, so that when
+a model is added it correlates and explains rather than deciding what happens to
+your cluster.
 
----
+The demo in the repository produces a 50 percent revert rate, and that is a
+property of a demo deliberately built so one of its two scenarios cannot be fixed
+by a rollback. It demonstrates that the measurement works end to end. It is not a
+production accuracy claim, and anyone quoting it as one is quoting a demo
+parameter.
 
-## C. X / short
+Version 0.1.0, alpha, Deployments only.
 
-Swapped `kubectl apply` for real Argo CD in my k8s agent's test setup.
+But it does read your cluster, commit a fix, watch, keep the one that worked, and
+revert the one that did not. And it will tell you, in writing, how often that
+second thing happens.
 
-Found in an hour: the agent committed its fix but never pushed. Reconciler never
-saw it → workload never recovered → agent reverted a fix that was *correct*.
+Code, threat model, and evaluation: [github.com/Srivatsa03/kubemend](https://github.com/Srivatsa03/kubemend)
 
-33 tests on that path. None had a remote.
 
-A stand-in doesn't just fail to test things. It satisfies the requirement for you.
+================================================================================
+## POSTING NOTES
+================================================================================
 
----
+LinkedIn:
+- The hook has to land in the first two lines. Everything after "Three of those
+  five steps are features." is behind "see more."
+- Attach demo.gif directly. Do not put the repo link in the post body, LinkedIn
+  suppresses reach on posts with external links. First comment instead.
+- Tuesday to Thursday, 8 to 10am in your target market's timezone.
+- Answer every comment in the first hour. That window decides distribution.
+- No hashtag soup. Two at most, or none.
 
-## D. X / demo-first
+Medium:
+- Title and subtitle are already split for Medium's title/subtitle fields.
+- Publish, then submit to a publication (Better Programming, ITNEXT, Level Up
+  Coding). Their distribution is worth more than yours.
+- Tag: Kubernetes, DevOps, SRE, Software Engineering, Testing.
+- Add the GIF under "The one that matters" heading.
 
-my k8s agent fixing a broken deploy, then failing to fix the next one and
-reverting its own commit
-
-26s: recovered, kept
-76s: still failing, withdrawn
-
-revert rate is the number that should decide whether an agent gets to act
-unattended, and ~nobody reports it
-
-[gif]
-
----
-
-## Notes
-
-- Lead with A. It's a craft post — no product claims to defend, useful to anyone
-  who writes tests, and it demonstrates judgment rather than output.
-- Don't call it "AI-powered." The planner is deterministic and the first reply
+Both:
+- Do not call it AI powered. The planner is deterministic and the first reply
   will be someone asking where the model is.
-- Never quote the 50% revert rate without its caveat.
-- The GIF is verbatim output of a real k3d run; `demo/transcript.txt` in the repo
-  is the same run in text, so anyone can check it.
+- Never quote the 50 percent revert rate without the caveat attached.
