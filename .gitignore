@@ -26,5 +26,7 @@ snapshots/
 # the demo recording is source, not an artifact
 !docs/media/demo.cast
 
-# paste-into-Medium scratch renders
-docs/posts/*.html
+# Post drafts and recording scratch: personal working material, not the project.
+# Kept on disk, deliberately not published.
+docs/posts/
+docs/media/render.py

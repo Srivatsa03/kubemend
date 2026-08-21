@@ -2,12 +2,14 @@
 
 | File | What it is |
 |---|---|
-| [`THREAT-MODEL.md`](THREAT-MODEL.md) | The adversary model and twelve failure modes, each marked prevented, mitigated or out of scope |
+| [`THREAT-MODEL.md`](THREAT-MODEL.md) | The adversary model and fourteen failure modes, each marked prevented, mitigated or out of scope |
 | [`EVALUATION.md`](EVALUATION.md) | Measured results, method, and the gaps |
-| [`FINDINGS.md`](FINDINGS.md) | Six engineering findings from building it |
+| [`FINDINGS.md`](FINDINGS.md) | Seven engineering findings from building it |
 | `kubemend-report.tex` | The technical report. Single self-contained LaTeX source. |
 | `kubemend-report.pdf` | Compiled output, 13 pages. |
 | `console.jpg` | Screenshot of the console, embedded by the report. |
+| `media/demo.gif` | The demo, recorded against a live cluster |
+| `media/demo.cast` | The asciinema recording the GIF was made from |
 
 The three markdown documents are the primary reference and are meant to be read
 in that order. The PDF covers the same ground in one continuous narrative, for
