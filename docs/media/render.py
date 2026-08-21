@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Render a recorded demo run as an animated terminal.
 
+    Superseded by an actual asciinema recording (docs/media/demo.cast). Kept
+    because it needs no recording tools and no cluster, which is why it existed.
+
 The text is the verbatim output of a real `demo/run.sh` against a live k3d
 cluster — nothing is re-enacted or retyped. The colours are kubemend's own,
 taken from cli.py: the demo pipes its output through `sed`, so it runs with

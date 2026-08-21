@@ -22,3 +22,9 @@ snapshots/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+
+# the demo recording is source, not an artifact
+!docs/media/demo.cast
+
+# paste-into-Medium scratch renders
+docs/posts/*.html
