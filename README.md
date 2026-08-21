@@ -344,4 +344,7 @@ Not yet built:
 
 ## License
 
-Apache-2.0
+Apache-2.0. Copyright 2026 Srivatsa Kamballa.
+
+> **Note on the name.** There is a package called `kubemend` on PyPI that is not
+> this project and is not mine. Install from this repository.
