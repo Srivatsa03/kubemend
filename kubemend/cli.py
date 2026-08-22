@@ -313,6 +313,23 @@ def show_log(args) -> int:
         print(f"    {c(BOLD, 'revert rate')} {stats.revert_rate:.0%}  "
               f"{c(DIM, f'({stats.reverted} of {stats.committed} fixes did not hold)')}")
 
+    # What each workload has earned. This is the log's reason for existing made
+    # visible: the numbers above are only worth collecting if something acts on
+    # them, and this is the something.
+    standings = [] if args.workload else journal.standings()
+    if standings:
+        from .earn import adjust
+        from .model import Autonomy
+        print(c(BOLD, "\n  standing") +
+              c(DIM, "   what each workload has earned on its own record\n"))
+        for rec in sorted(standings, key=lambda r: (-r.streak, r.workload)):
+            moved = adjust(Autonomy.PROPOSE, rec, ceiling=Autonomy.APPLY)
+            tone = "32;1" if moved.promoted else ("33" if moved.demoted else DIM)
+            mark = "↑" if moved.promoted else ("↓" if moved.demoted else "·")
+            print(f"    {c(tone, mark)} {rec.workload:<34} "
+                  f"{c(DIM, f'{rec.verified}/{rec.committed} held, streak {rec.streak}')}")
+            print(f"        {c(DIM, moved.reason)}")
+
     # Pointless when the caller already named the workload they care about.
     repeats = [] if args.workload else [
         (w, n) for w, n in journal.repeat_offenders(5) if n > 1

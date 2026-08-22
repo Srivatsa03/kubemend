@@ -194,7 +194,7 @@ Zero runtime dependencies is verifiable rather than asserted: a clean-environmen
 
 ```bash
 python3.12 -m venv /tmp/check && /tmp/check/bin/pip install -q .
-/tmp/check/bin/pip list --format=freeze     # kubemend==0.1.0
+/tmp/check/bin/pip list --format=freeze     # kubemend==0.2.0
 ```
 
 CI runs the suite on Python 3.10 and 3.13, plus a separate job that installs k3d, creates a real cluster, and runs the full demo end to end.
@@ -208,6 +208,7 @@ Stated plainly, because the gaps are more informative than the numbers:
 - **No accuracy measurement on real incidents.** There is no labelled corpus of "what a human would have done", so precision and recall of the *planner* are unmeasured. The revert rate is a proxy for it, and only for the cases where the agent acted.
 - **No false-negative measurement.** Nothing measures the problems detection misses.
 - **No load or scale testing.** Behaviour on a cluster with thousands of workloads is unknown.
+- **Earned autonomy has never run against real history.** The promotion and demotion rules are unit tested and were exercised against a simulated sequence of incidents, which is how the demotion floor bug was found. No workload has earned anything from a real cluster's log yet, because that takes weeks of real incidents.
 - **No multi-workload verification.** Recovery is confirmed for the treated workload only.
 - **Verification is only measured on `image_pull`.** Both live scenarios are pull failures; the other seven rules have unit coverage but no live end-to-end verification run.
 

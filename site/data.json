@@ -260,8 +260,8 @@
   "commit_message": "rollback payments/deployment/checkout\n\nObserved:\n  [critical] cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-449mb\n\nChanged:\n  restored clusters/prod/checkout.yaml to e0f51568\n    reason: image_pull: cannot pull image nginx:1.27-alpine-typo for checkout-6d78fb9788-449mb\n\nBlast radius: 2 pod(s) across 1 workload(s).\nUndo: git revert this commit."
  },
  "project": {
-  "tests": 164,
-  "loc": 3349,
+  "tests": 180,
+  "loc": 3646,
   "actions": [
    {
     "kind": "scale",

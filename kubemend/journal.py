@@ -434,6 +434,19 @@ class Journal:
             committed=committed, verified=verified, reverted=reverted, streak=streak,
         )
 
+    def standings(self, limit: int = 20) -> list["Record"]:
+        """Every workload the agent has actually written a fix for.
+
+        Refusals and reports are excluded: a workload the agent only ever talked
+        about has no track record, and listing it would imply otherwise.
+        """
+        rows = self._query(
+            "SELECT DISTINCT namespace, name FROM incidents"
+            " WHERE commit_sha != '' ORDER BY namespace, name LIMIT ?",
+            (limit,),
+        )
+        return [self.record_for(r["namespace"], r["name"]) for r in rows]
+
     def namespaces(self) -> list[str]:
         return [r["namespace"] for r in self._query(
             "SELECT DISTINCT namespace FROM incidents ORDER BY namespace"

@@ -267,6 +267,25 @@ So kubemend never emits commands. It selects from a **closed set of six typed ac
 
 Adding an action kind is a security decision, not a feature decision.
 
+### Autonomy is earned, not just configured
+
+Since v0.2, a workload's own track record moves its autonomy level. Ten consecutive fixes that held raise it; one withdrawn fix lowers it.
+
+```
+  standing   what each workload has earned on its own record
+
+    ↑ payments/checkout                  12/12 held, streak 12
+        12 consecutive fixes here held; earned apply
+    · jobs/report-worker                 2/2 held, streak 2
+        only 2 fix(es) here, needs 5 to count
+    · payments/api                       7/8 held, streak 0
+        1 withdrawn fix(es) here; already at propose, which is where a human sees it
+```
+
+The asymmetries are the design. **Promotion is slow and demotion is instant**, because promoting too eagerly hands production to an agent that has not earned it while demoting too eagerly costs a human some review. **Policy sets the bounds and evidence moves inside them** — `earned_ceiling` defaults to the policy's own starting level, so this is off unless a policy opens headroom. **Evidence never touches a hard refusal**, so a spotless record in `kube-system` is still refused. And **demotion floors at `propose`, never `report`**, because a workload whose last fix was withdrawn is one a human should be reviewing rather than one the agent goes quiet about.
+
+Nothing moves silently: every adjusted level carries the sentence explaining it. `--ignore-history` gates on policy alone.
+
 ### Three levels of autonomy, granted per action
 
 Trust is earned per action class, mirroring the crawl/walk/run progression operations teams actually use:

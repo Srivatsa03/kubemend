@@ -1,6 +1,6 @@
 # An agent is trustworthy in proportion to what it cannot do
 
-Seven findings from building a remediation agent that is allowed to change production.
+Eight findings from building a remediation agent that is allowed to change production.
 
 **A note on what kind of document this is.** These are *engineering* findings, not empirical results. They came out of building the system and watching it fail in specific ways, and the evidence for each is a design consequence or a real bug, not a controlled experiment. Where a number appears it is reproducible ([`EVALUATION.md`](EVALUATION.md)); where a judgement appears it is labelled as one. The distinction matters because the temptation in this space is to dress design opinions as measurements, and that is precisely the habit that makes agent tooling hard to evaluate.
 
@@ -15,8 +15,9 @@ Seven findings from building a remediation agent that is allowed to change produ
 | 5 | Abstention is the majority behaviour, so it has to be a designed output rather than a fallthrough. |
 | 6 | The measurement that decides trust is the one nobody publishes. |
 | 7 | A stand-in for a dependency hides the bugs that only the real one causes. |
+| 8 | A safety mechanism should be asymmetric toward the worse error, and "safest" is not always "least". |
 
-The thread running through all seven: **a safety property that holds because the code cannot express the alternative survives contact with production. A property that holds because the system is usually careful does not.** Most of the work below is moving properties from the second category into the first.
+The thread running through all eight: **a safety property that holds because the code cannot express the alternative survives contact with production. A property that holds because the system is usually careful does not.** Most of the work below is moving properties from the second category into the first.
 
 ---
 
@@ -223,6 +224,50 @@ real one enforces that the substitute does not. Here it was one word —
 uncomfortable: the more convenient the stand-in, the more requirements it is
 silently satisfying on your behalf.
 
+## Finding 8: asymmetry is the design, and "safest" is not always "least"
+
+**Claim.** When a mechanism can err in two directions, the correct design is
+lopsided toward the worse error. The trap is assuming the safest setting is
+always the most restrictive one.
+
+Earned autonomy lets a workload's own record move its autonomy level: ten
+consecutive fixes that held raise it, one withdrawn fix lowers it. The
+asymmetry there is obvious once stated. Promoting too eagerly hands production
+to an agent that has not earned it; demoting too eagerly costs a human some
+review. One of those is recoverable during an incident and the other *is* the
+incident, so promotion is slow and demotion is instant.
+
+**The second half is where I was wrong.** Having established "demotion is safe,
+do it readily", I implemented it as a step down one level per revert. A
+workload that had earned `apply` therefore fell to `report` after a single
+failed fix.
+
+`report` means the agent observes and says nothing. So the rule I had written
+was: *when a fix fails on this workload, go quiet about it.* That is the exact
+moment a human most wants to see the agent's next proposal, and I had removed
+it in the name of safety.
+
+Demotion now floors at `propose`:
+
+```python
+lowered = min(base, Autonomy.PROPOSE, key=lambda a: _RANK[a])
+```
+
+A recent revert means **a person reviews the next one**, never that nothing gets
+said. Less autonomy is safer only up to the point where it becomes less
+information.
+
+**How it was caught matters as much as the bug.** Not by a test, because my
+tests asserted the property I believed in. I found it by simulating fourteen
+incidents in sequence and printing the level after each one, and the last line
+read `report` where I expected `propose`. Reasoning about the rule produced the
+wrong rule; watching the rule run produced the right one.
+
+**What it implies.** For any mechanism with a safe direction, write down what
+happens at the extreme of that direction and ask whether you would want it. The
+most restrictive setting is not automatically the most defensible one, and
+"fails closed" stops being a virtue at the point where closed means blind.
+
 ## What this means if you are building one
 
 1. **Decide where the write lands before anything else.** It determines which safety properties are available at all, and no amount of model quality recovers a property the architecture forecloses.
@@ -231,7 +276,8 @@ silently satisfying on your behalf.
 4. **Separate "no evidence" from "evidence of failure"** and give them different consequences. Collapsing them produces either false confidence or gratuitous churn.
 5. **Assume every fail-safe component can hide its own bugs,** and give something outside it visibility.
 6. **Publish the accuracy number**, including when it is unflattering. It is the one that decides whether the thing gets to act.
-7. **Run it against the real dependency early.** A stand-in does not merely fail to test things; it satisfies requirements on your behalf and hides the defects that violate them.
+7. **Make safety mechanisms asymmetric toward the worse error**, then check the extreme of the safe direction. Restrictive is not the same as defensible.
+8. **Run it against the real dependency early.** A stand-in does not merely fail to test things; it satisfies requirements on your behalf and hides the defects that violate them.
 
 ## Limits of these findings
 

@@ -278,6 +278,13 @@
     <div class="ns" id="ns-list"></div>
     <p class="note" style="margin-top:1rem">An unconfigured <code>Policy()</code> permits nothing. A permissive default is the difference between a bounded assistant and an unsupervised process with cluster credentials.</p>
 
+    <h3>Autonomy is earned, not just configured</h3>
+    <p>Those levels are a starting point, not a verdict. A workload's own record moves it: ten consecutive fixes that held raise it a level, one withdrawn fix lowers it. The number the log has been collecting all along is what decides.</p>
+    <p>The asymmetries are the design. Promotion is slow and demotion is instant, because promoting too eagerly hands production to an agent that has not earned it while demoting too eagerly costs a human some review. Policy still sets the bounds and evidence only moves inside them. And a spotless record buys a shorter leash, never a different rulebook, so <code>kube-system</code> stays refused no matter how good the history is.</p>
+    <div class="callout">
+      <strong>Demotion stops at "a human reviews the next one".</strong> It never falls to silence. A workload whose last fix was withdrawn is exactly the one you want to see a proposal for, and an earlier version of this rule dropped it to report-only, which meant the agent went quiet at the worst possible moment.
+    </div>
+
     <h3>Abstaining is the common case</h3>
     <p id="abstain">—</p>
     <p>Those are not gaps. A missing ConfigMap needs a value the agent has no business inventing; an unschedulable pod is a capacity decision; a container restarting for unclear reasons needs a human to read the logs. An agent that acted on all thirteen would be worse, not more capable — so abstention is a designed output, and the test suite asserts it rather than merely tolerating it.</p>
@@ -342,7 +349,7 @@ kubemend serve                     <span style="color:#9aa0a8"># the console, on
 
   <div class="col">
     <h3>What has not been established</h3>
-    <p class="note">No production deployment — the cluster is local, there is no traffic, and the incidents are injected rather than organic. The headline demo substitutes <code>kubectl apply</code> for a reconciler; <code>deploy/</code> runs real Argo CD against a real GitHub repository instead, and doing that is what exposed a bug where an applied fix was committed but never pushed. The planner is <strong>deterministic</strong>; there is no model in the decision path, which is sequencing rather than limitation, so that when one is added it correlates and explains rather than deciding what happens to your cluster. Verification is single-workload: it confirms the treated workload recovered, not that the change was harmless to its dependents. Coverage is Deployments only. Version 0.1.0, alpha.</p>
+    <p class="note">No production deployment — the cluster is local, there is no traffic, and the incidents are injected rather than organic. The headline demo substitutes <code>kubectl apply</code> for a reconciler; <code>deploy/</code> runs real Argo CD against a real GitHub repository instead, and doing that is what exposed a bug where an applied fix was committed but never pushed. The planner is <strong>deterministic</strong>; there is no model in the decision path, which is sequencing rather than limitation, so that when one is added it correlates and explains rather than deciding what happens to your cluster. Verification is single-workload: it confirms the treated workload recovered, not that the change was harmless to its dependents. Coverage is Deployments only. Version 0.2.0, alpha.</p>
   </div>
 </section>
 
@@ -380,7 +387,7 @@ function render(d) {
     `${a.findings} findings · live k3d run`;
   $("#m-impl").textContent =
     `${pr.loc.toLocaleString()} lines · ${pr.tests} tests · 0 deps`;
-  $("#foot-ver").textContent = `kubemend v0.1.0 · ${pr.tests} tests`;
+  $("#foot-ver").textContent = `kubemend v0.2.0 · ${pr.tests} tests`;
 
   // --- figure 1: the commit ------------------------------------------------
   $("#f1-sha").textContent = dm.kept_commit || "";

@@ -298,6 +298,14 @@ CONSERVATIVE = Policy(
         ActionKind.SCALE: Autonomy.PROPOSE,
         ActionKind.SET_RESOURCES: Autonomy.PROPOSE,
     },
+    # Headroom a workload may earn on its own record. This is what the
+    # conservative policy is *for*: start everything under review, and let the
+    # ones that keep being right stop needing a human. A workload with no
+    # history gets none of it, and one withdrawn fix takes it back.
+    earned_ceiling={
+        ActionKind.SCALE: Autonomy.APPLY,
+        ActionKind.SET_RESOURCES: Autonomy.APPLY,
+    },
     default_autonomy=Autonomy.REPORT,
     max_impacted_pods=5,
     max_workloads=1,

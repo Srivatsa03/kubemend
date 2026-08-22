@@ -136,6 +136,10 @@ A plan's autonomy is the **minimum across its actions**, so one action requiring
 
 The measurement half matters as much: the incident log reports the agent's **revert rate** — how often its own fix failed to hold. That is the honest input to "should this be allowed to apply rather than propose?", and a tool that declined to measure it would be asking for trust it had not earned.
 
+Since v0.2 that number is load-bearing rather than advisory. A workload's own record moves its autonomy level, inside bounds policy sets: ten consecutive fixes that held raise it one level, one withdrawn fix lowers it. `Policy.earned_ceiling` defaults to the policy's starting level, so this is off unless a policy deliberately opens headroom.
+
+Two properties keep it from becoming a hole. **Evidence never touches a hard refusal** — protected namespaces, disallowed kinds, blast radius and reversibility are all decided before it runs, so a spotless record in `kube-system` is still refused. And **demotion floors at `propose`**, never `report`, because a workload whose last fix was withdrawn is one a human should be reviewing, not one the agent goes quiet about.
+
 ### 13. A change that is committed but never delivered
 
 **Failure.** The agent commits a fix, the commit never reaches the remote the
@@ -167,6 +171,16 @@ so invisibly.
 askpass, non-interactive SSH, and no inherited stdin, so a credential request
 becomes a fast reportable failure instead of a hang. Timeouts are surfaced as
 delivery failures rather than crashes.
+
+### 15. Autonomy earned on a misleading record
+
+**Failure.** A workload accumulates a clean record for reasons that do not generalise, gets promoted to `apply`, and the next fix is the one that matters.
+
+**Response — mitigated, not prevented.** This is a real residual risk and worth stating plainly.
+
+What bounds it: promotion needs ten consecutive holds and a minimum of five committed fixes, so a thin record earns nothing; the streak counts backwards to the last revert, so old success cannot outweigh recent failure; promotion never exceeds the ceiling policy declares; and every level that moved says why, with a pointer to the record behind it.
+
+What does not: a workload can be genuinely easy for a long time and then change character, and nothing here detects that in advance. The mitigation for the case where it goes wrong is the rest of the system, which is the argument for having made the actions reversible in the first place. `--ignore-history` gates on policy alone for anyone who does not want this at all.
 
 ## What the gate enforces
 
