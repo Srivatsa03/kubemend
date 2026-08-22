@@ -137,7 +137,12 @@ def remediate(args) -> int:
     written = 0
     for plan in plans:
         target = next(iter(plan.targets))
-        verdict = gate(plan, policy, recent_plans=args.recent_plans)
+        # The workload's own record, if there is a log to read it from. Passed
+        # in rather than looked up inside the gate, so the gate stays a function
+        # of its arguments.
+        record = (journal.record_for(target.namespace, target.name)
+                  if journal and journal.available and not args.ignore_history else None)
+        verdict = gate(plan, policy, recent_plans=args.recent_plans, record=record)
         if not verdict.allowed:
             print(f"    {c('31;1', '✗')} {c('31;1', 'REFUSED ')} {target}")
             for v in verdict.violations:
@@ -157,9 +162,15 @@ def remediate(args) -> int:
                   file=sys.stderr)
             return 2
 
+        earned = next(
+            (v for v in verdict.violations if v.code.startswith("earned_")), None
+        )
         label = "DRY RUN" if args.dry_run else autonomy.value.upper()
         tone = AUTONOMY_COLOR[autonomy]
         print(f"    {c(tone, '✓')} {c(tone, f'{label:<8}')} {target}")
+        if earned:
+            arrow = "↑" if earned.code == "earned_promotion" else "↓"
+            print(f"        {c('36', arrow + ' ' + earned.message)}")
         for change in emission.applied:
             print(f"        {change.detail}")
         for change in emission.skipped:
@@ -408,6 +419,10 @@ def build_parser() -> argparse.ArgumentParser:
     rem.add_argument(
         "--pr", action="store_true",
         help="push proposed branches and open a pull request (needs a remote and gh)",
+    )
+    rem.add_argument(
+        "--ignore-history", action="store_true",
+        help="gate on policy alone, ignoring what this workload has earned",
     )
     rem.add_argument(
         "--no-push", action="store_true",

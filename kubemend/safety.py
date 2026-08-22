@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .earn import Record, adjust
 from .model import Action, ActionKind, Autonomy, Plan
 
 __all__ = ["Policy", "Violation", "Verdict", "gate", "CONSERVATIVE", "STAGING"]
@@ -82,6 +83,11 @@ class Policy:
     # to default_autonomy, which is the most restrictive level.
     autonomy: dict[ActionKind, Autonomy] = field(default_factory=dict)
     default_autonomy: Autonomy = Autonomy.REPORT
+    # The highest level a workload's track record may earn for a given kind.
+    # Absent means the starting level is also the ceiling, so earned autonomy
+    # is off unless a policy deliberately opens headroom. Same principle as
+    # allowed_kinds: nothing is permitted by omission.
+    earned_ceiling: dict[ActionKind, Autonomy] = field(default_factory=dict)
     # Blast radius. These bound a single plan, not a single action, because the
     # risk of a change is a property of the whole set.
     max_impacted_pods: int = 5
@@ -94,6 +100,11 @@ class Policy:
 
     def ceiling(self, kind: ActionKind) -> Autonomy:
         return self.autonomy.get(kind, self.default_autonomy)
+
+    def earned_top(self, kind: ActionKind) -> Autonomy:
+        """How far evidence may raise this kind, never below its start."""
+        top = self.earned_ceiling.get(kind, self.ceiling(kind))
+        return max(top, self.ceiling(kind), key=lambda a: _AUTONOMY_RANK[a])
 
 
 @dataclass
@@ -117,12 +128,15 @@ class Verdict:
         return "refused: " + "; ".join(v.message for v in self.violations)
 
 
-def gate(plan: Plan, policy: Policy, recent_plans: int = 0) -> Verdict:
+def gate(plan: Plan, policy: Policy, recent_plans: int = 0,
+         record: "Record | None" = None) -> Verdict:
     """Evaluate a plan against policy.
 
     ``recent_plans`` is supplied by the caller rather than read from a clock, so
     this stays a pure function and the flap-protection rule can be tested
-    without waiting for time to pass.
+    without waiting for time to pass. ``record`` is passed in for the same
+    reason: the workload's track record comes from the journal, and the gate
+    stays a function of its arguments rather than of a database.
 
     A verdict may be *allowed but held*: the plan is legitimate, but something
     about it caps how far it travels, so it becomes a pull request instead of a
@@ -232,6 +246,35 @@ def gate(plan: Plan, policy: Policy, recent_plans: int = 0) -> Verdict:
                 remedy="raise policy.autonomy for those kinds once they have proven safe",
             )
         )
+
+    # Everything above is policy. This is the workload's own record, applied
+    # last and only to the autonomy level: a hard refusal has already returned,
+    # so nothing here can talk its way past one. The headroom is the lowest
+    # earned ceiling across the plan's actions, for the same reason the starting
+    # level is the lowest: one action that has not earned its place holds the
+    # whole plan back.
+    if record is not None and not record.empty:
+        headroom = min(
+            (policy.earned_top(a.kind) for a in plan.actions),
+            key=lambda level: _AUTONOMY_RANK[level],
+        )
+        moved = adjust(ceiling, record, ceiling=headroom)
+        if moved.changed:
+            held.append(
+                Violation(
+                    # Two codes rather than one, so a reader (and the CLI) can
+                    # tell which direction the evidence moved things without
+                    # parsing the sentence.
+                    code="earned_promotion" if moved.promoted else "earned_demotion",
+                    message=moved.reason,
+                    remedy=(
+                        "this level came from the incident log, not the policy file; "
+                        "kubemend log --workload <name> shows the record behind it"
+                    ),
+                )
+            )
+            ceiling = moved.level
+
     return Verdict(allowed=True, autonomy=ceiling, violations=held)
 
 

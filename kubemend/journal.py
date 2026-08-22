@@ -395,6 +395,45 @@ class Journal:
             "findings": findings, "actions": actions,
         }
 
+    def record_for(self, namespace: str, name: str) -> "Record":
+        """One workload's track record, for deciding what it has earned.
+
+        The streak is counted backwards from the most recent incident and stops
+        at the first revert, because promotion is an argument about what has
+        happened *since* the agent was last wrong here. A long lifetime record
+        with a revert yesterday is not a good record.
+        """
+        from .earn import Record
+
+        rows = self._query(
+            "SELECT commit_sha, reverted_sha, verification FROM incidents"
+            " WHERE namespace = ? AND name = ? ORDER BY id DESC",
+            (namespace, name),
+        )
+        committed = verified = reverted = streak = 0
+        counting = True
+        for r in rows:
+            if not r["commit_sha"]:
+                continue                       # refused or reported: not a fix
+            committed += 1
+            if r["reverted_sha"]:
+                reverted += 1
+                counting = False               # the streak ends here
+                continue
+            if r["verification"] == "recovered":
+                verified += 1
+                if counting:
+                    streak += 1
+            else:
+                # Committed but never confirmed. Not a failure, but not
+                # evidence either, so it stops the streak without counting
+                # against the workload.
+                counting = False
+        return Record(
+            workload=f"{namespace}/{name}",
+            committed=committed, verified=verified, reverted=reverted, streak=streak,
+        )
+
     def namespaces(self) -> list[str]:
         return [r["namespace"] for r in self._query(
             "SELECT DISTINCT namespace FROM incidents ORDER BY namespace"
